@@ -1,0 +1,27 @@
+{
+    "name": "telegram-bot-transaksi",
+    "version": "1.0.0",
+    "description": "Bot Telegram untuk otomatisasi pencatatan transaksi pembelian dan penjualan",
+    "main": "main.js",
+    "scripts": {
+        "start": "node main.js",
+        "dev": "nodemon main.js"
+    },
+    "keywords": [
+        "telegram",
+        "bot",
+        "transaksi",
+        "akuntansi",
+        "otomatisasi"
+    ],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "chalk": "^4.1.2",
+        "dotenv": "^16.3.1",
+        "googleapis": "^126.0.1",
+        "node-cron": "^3.0.3",
+        "nodemon": "^3.0.1",
+        "telegraf": "^4.12.2"
+    }
+}
