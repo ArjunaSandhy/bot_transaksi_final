@@ -14,6 +14,53 @@ const bot = new Telegraf(config.botToken);
 // Rate limiter untuk API calls (20 request per menit)
 const apiRateLimiter = createRateLimiter(20, 60 * 1000);
 
+// Middleware untuk pemeriksaan akses
+bot.use(async(ctx, next) => {
+    try {
+        // Jika fitur access control tidak diaktifkan, lanjutkan saja
+        if (!config.accessControl.enabled) {
+            return next();
+        }
+
+        // Dapatkan informasi chat
+        const chatId = ctx.chat.id;
+        const chatType = ctx.chat.type;
+        const userId = ctx.from.id;
+
+        // Jika private chat, periksa apakah user diizinkan
+        if (chatType === 'private') {
+            const allowedUsers = config.accessControl.allowedUsers;
+            if (allowedUsers.length === 0 || !allowedUsers.includes(userId.toString())) {
+                Logger.warning(`Akses ditolak untuk private chat dengan user ID: ${userId}`);
+                await ctx.reply(config.accessControl.accessDeniedMessage);
+                return; // Hentikan eksekusi, jangan lanjut ke handler berikutnya
+            }
+        }
+        // Jika grup atau supergroup, periksa apakah grup diizinkan
+        else if (chatType === 'group' || chatType === 'supergroup') {
+            const allowedGroups = config.accessControl.allowedGroups;
+            // Jika daftar grup yang diizinkan tidak kosong dan grup ini tidak dalam daftar
+            if (allowedGroups.length > 0 && !allowedGroups.includes(chatId.toString())) {
+                Logger.warning(`Akses ditolak untuk grup dengan ID: ${chatId}`);
+                await ctx.reply(config.accessControl.accessDeniedMessage);
+                return; // Hentikan eksekusi, jangan lanjut ke handler berikutnya
+            }
+        }
+        // Tolak channel atau jenis chat lain
+        else {
+            Logger.warning(`Akses ditolak untuk jenis chat: ${chatType} dengan ID: ${chatId}`);
+            await ctx.reply(config.accessControl.accessDeniedMessage);
+            return;
+        }
+
+        // Jika semua pemeriksaan berhasil, lanjutkan ke handler berikutnya
+        return next();
+    } catch (error) {
+        Logger.error(`Error pada middleware pemeriksaan akses: ${error.message}`, error);
+        return next(); // Tetap lanjutkan jika terjadi error untuk menghindari bot mati
+    }
+});
+
 // Fungsi untuk mendapatkan nama pengirim
 function getSenderName(ctx) {
     if (ctx.message.from.username) {

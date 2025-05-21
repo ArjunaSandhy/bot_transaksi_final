@@ -14,6 +14,7 @@ Bot Telegram untuk otomatisasi pencatatan transaksi pembelian dan penjualan yang
 - Hyperlink "Lihat Lampiran" untuk akses cepat ke file yang diunggah
 - Pembersihan otomatis baris kosong di spreadsheet
 - Format spreadsheet yang rapi dengan header berwarna, kolom dibekukan, dan lebar kolom yang optimal
+- Kontrol akses yang membatasi bot hanya dapat digunakan oleh grup dan pengguna tertentu
 
 ## Prasyarat
 
@@ -76,7 +77,32 @@ Bot Telegram untuk otomatisasi pencatatan transaksi pembelian dan penjualan yang
 2. Bagikan folder dengan service account yang telah dibuat (gunakan email service account)
 3. Salin ID folder (bagian URL setelah `folders/`) untuk digunakan nanti
 
-### 5. Konfigurasi Aplikasi
+### 5. Konfigurasi Access Control (Kontrol Akses)
+
+Untuk membatasi bot agar hanya dapat digunakan oleh grup dan pengguna tertentu:
+
+1. **Dapatkan ID Grup Telegram**:
+   - Tambahkan bot ke grup target
+   - Kirim pesan di grup
+   - Gunakan bot `@get_id_bot` atau jalankan script `get-chat-id.js` (disertakan dalam repositori)
+   - Catat ID grup (format: `-100xxxxxxxxxx`)
+
+2. **Dapatkan ID Pengguna Telegram**:
+   - Chat pribadi dengan bot `@userinfobot` atau `@get_id_bot`
+   - Catat ID pengguna numerik Anda
+
+3. **Konfigurasi di file `.env`**:
+   ```
+   ACCESS_CONTROL_ENABLED=true
+   ALLOWED_GROUPS=-100123456789,-100987654321
+   ALLOWED_USERS=123456789,987654321
+   ```
+
+   - `ACCESS_CONTROL_ENABLED`: Set `true` untuk mengaktifkan kontrol akses
+   - `ALLOWED_GROUPS`: Daftar ID grup yang diizinkan, dipisahkan koma
+   - `ALLOWED_USERS`: Daftar ID pengguna yang diizinkan chat private, dipisahkan koma
+
+### 6. Konfigurasi Aplikasi
 
 1. Clone repositori ini
 2. Jalankan `npm install` untuk menginstal dependensi
@@ -84,6 +110,7 @@ Bot Telegram untuk otomatisasi pencatatan transaksi pembelian dan penjualan yang
    - `BOT_TOKEN`: Token bot Telegram
    - `SPREADSHEET_ID`: ID Google Spreadsheet
    - `DRIVE_FOLDER_ID`: ID folder Google Drive
+   - Pengaturan access control (lihat bagian sebelumnya)
 4. Letakkan file `credentials.json` yang telah didownload di root folder project
 5. Jalankan bot dengan `npm start`
 
@@ -196,11 +223,17 @@ Bot ini dilengkapi dengan beberapa fitur otomatisasi:
 - Pastikan token bot benar
 - Pastikan bot telah ditambahkan ke grup
 - Pastikan format pesan sudah benar
+- Periksa apakah ID grup atau ID pengguna telah diatur dengan benar di file .env jika menggunakan fitur access control
 
 ### Error saat menyimpan ke Google Sheets atau Drive
 - Pastikan file `credentials.json` sudah benar
 - Pastikan ID spreadsheet dan folder sudah benar
 - Pastikan service account memiliki akses ke spreadsheet dan folder
+
+### Masalah dengan Kontrol Akses
+- Pastikan ID grup dan ID pengguna yang dimasukkan sudah benar
+- Perhatikan format ID grup: `-100xxxxxxxxxx`
+- Perlu diperhatikan bahwa ID grup dan ID pengguna harus dalam format string di file .env
 
 ### Masalah dengan Baris Kosong
 Jika masih terdapat masalah dengan baris kosong, coba jalankan perintah `/clean` di grup Telegram untuk membersihkan spreadsheet secara manual.
