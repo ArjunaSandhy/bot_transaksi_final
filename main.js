@@ -38,9 +38,8 @@ bot.use(async(ctx, next) => {
         }
         // Jika grup atau supergroup, periksa apakah grup diizinkan
         else if (chatType === 'group' || chatType === 'supergroup') {
-            const allowedGroups = config.accessControl.allowedGroups;
-            // Jika daftar grup yang diizinkan tidak kosong dan grup ini tidak dalam daftar
-            if (allowedGroups.length > 0 && !allowedGroups.includes(chatId.toString())) {
+            // Periksa apakah grup ada dalam konfigurasi
+            if (!config.groups[chatId.toString()]) {
                 Logger.warning(`Akses ditolak untuk grup dengan ID: ${chatId}`);
                 await ctx.reply(config.accessControl.accessDeniedMessage);
                 return; // Hentikan eksekusi, jangan lanjut ke handler berikutnya
@@ -51,6 +50,11 @@ bot.use(async(ctx, next) => {
             Logger.warning(`Akses ditolak untuk jenis chat: ${chatType} dengan ID: ${chatId}`);
             await ctx.reply(config.accessControl.accessDeniedMessage);
             return;
+        }
+
+        // Tambahkan informasi grup ke context untuk digunakan handler lain
+        if (chatType === 'group' || chatType === 'supergroup') {
+            ctx.groupConfig = config.groups[chatId.toString()];
         }
 
         // Jika semua pemeriksaan berhasil, lanjutkan ke handler berikutnya
@@ -87,7 +91,6 @@ function escapeMarkdown(text) {
         .replace(/\>/g, '\\>')
         .replace(/\#/g, '\\#')
         .replace(/\+/g, '\\+')
-        .replace(/\-/g, '\\-')
         .replace(/\=/g, '\\=')
         .replace(/\|/g, '\\|')
         .replace(/\{/g, '\\{')
@@ -192,6 +195,9 @@ bot.on(['photo', 'document'], async(ctx) => {
             return;
         }
 
+        // Dapatkan konfigurasi grup jika ada
+        const groupConfig = ctx.groupConfig;
+
         // Cek khusus untuk perintah /pelunasan
         const isPelunasan = caption.match(/^\/pelunasan(?:\s|\n|\r\n|$)/i);
         if (isPelunasan) {
@@ -258,7 +264,7 @@ bot.on(['photo', 'document'], async(ctx) => {
 
             try {
                 // Cari data iklan yang sudah dilunasi
-                const paidAd = await sheetsService.findPaidAdvertisement(data.noInvoice);
+                const paidAd = await sheetsService.findPaidAdvertisement(data.noInvoice, groupConfig);
 
                 if (!paidAd) {
                     await ctx.telegram.deleteMessage(ctx.chat.id, statusMessage.message_id);
@@ -280,9 +286,9 @@ bot.on(['photo', 'document'], async(ctx) => {
                 // Update nama file dengan format yang sama seperti /pembelian
                 if (ctx.message.document) {
                     const originalExt = path.extname(ctx.message.document.file_name);
-                    fileName = `${filePrefix}.${formattedDate}.${data.noInvoice}.${supplierName}-INV${originalExt}`;
+                    fileName = `${filePrefix}.${formattedDate}.${data.noInvoice}.${supplierName}-${groupConfig.name}-INV${originalExt}`;
                 } else if (ctx.message.photo) {
-                    fileName = `${filePrefix}.${formattedDate}.${data.noInvoice}.${supplierName}-INV.jpg`;
+                    fileName = `${filePrefix}.${formattedDate}.${data.noInvoice}.${supplierName}-${groupConfig.name}-INV.jpg`;
                 }
 
                 // Upload file ke Google Drive
@@ -290,10 +296,10 @@ bot.on(['photo', 'document'], async(ctx) => {
                 const response = await fetch(fileLink);
                 const fileBuffer = Buffer.from(await response.arrayBuffer());
                 const optimizedBuffer = optimizeFileProcessing(fileBuffer, mimeType);
-                const uploadResult = await driveService.uploadFile(optimizedBuffer, mimeType, fileName);
+                const uploadResult = await driveService.uploadFile(optimizedBuffer, mimeType, fileName, groupConfig);
 
                 // Update kolom lampiran pada baris yang sesuai
-                await sheetsService.updateInvoiceIklanAttachment(data.noInvoice, uploadResult.url);
+                await sheetsService.updateInvoiceIklanAttachment(data.noInvoice, uploadResult.url, groupConfig);
 
                 // Hapus status message
                 try {
@@ -400,7 +406,7 @@ bot.on(['photo', 'document'], async(ctx) => {
 
         // Cek apakah nomor invoice sudah ada di spreadsheet
         try {
-            const existingInvoice = await sheetsService.findInvoice(data.noInvoice);
+            const existingInvoice = await sheetsService.findInvoice(data.noInvoice, groupConfig);
             if (existingInvoice) {
                 // Jika nomor invoice sudah ada, kembalikan pesan error dengan informasi baris
                 ctx.reply(`❌ No. INV: ${data.noInvoice} sudah ada pada baris ke-${existingInvoice.rowIndex}`, {
@@ -428,12 +434,12 @@ bot.on(['photo', 'document'], async(ctx) => {
             fileId = ctx.message.document.file_id;
             mimeType = ctx.message.document.mime_type;
             const originalExt = path.extname(ctx.message.document.file_name);
-            fileName = `${filePrefix}.${formattedDate}.${data.noInvoice}.${entityName}-INV${originalExt}`;
+            fileName = `${filePrefix}.${formattedDate}.${data.noInvoice}.${entityName}-${groupConfig.name}-INV${originalExt}`;
         } else if (ctx.message.photo) {
             const photo = ctx.message.photo[ctx.message.photo.length - 1];
             fileId = photo.file_id;
             mimeType = 'image/jpeg';
-            fileName = `${filePrefix}.${formattedDate}.${data.noInvoice}.${entityName}-INV.jpg`;
+            fileName = `${filePrefix}.${formattedDate}.${data.noInvoice}.${entityName}-${groupConfig.name}-INV.jpg`;
         }
 
         const statusMessage = await ctx.reply('⏳ Memproses transaksi...', {
@@ -461,50 +467,40 @@ bot.on(['photo', 'document'], async(ctx) => {
 
             if (data.type === 'penjualan') {
                 // Untuk penjualan: Upload file ke Google Drive dan simpan URL
-                let uploadResult = memoryCache.get(`file_${fileId}`);
+                const fileLink = await ctx.telegram.getFileLink(fileId);
+                const response = await fetch(fileLink);
+                const fileBuffer = Buffer.from(await response.arrayBuffer());
 
-                if (!uploadResult) {
-                    const fileLink = await ctx.telegram.getFileLink(fileId);
-                    const response = await fetch(fileLink);
-                    const fileBuffer = Buffer.from(await response.arrayBuffer());
+                const optimizedBuffer = optimizeFileProcessing(fileBuffer, mimeType);
 
-                    const optimizedBuffer = optimizeFileProcessing(fileBuffer, mimeType);
-
-                    uploadResult = await driveService.uploadFile(optimizedBuffer, mimeType, fileName);
-                    memoryCache.set(`file_${fileId}`, uploadResult, 3600);
-                }
+                const uploadResult = await driveService.uploadFile(optimizedBuffer, mimeType, fileName, groupConfig);
 
                 // Tambahkan URL file ke data
                 data.fileUrl = uploadResult.url;
 
                 // Simpan data penjualan ke Google Sheets
-                rowNumber = await sheetsService.savePenjualan(data);
+                rowNumber = await sheetsService.savePenjualan(data, groupConfig);
             } else if (data.type === 'iklan') {
                 // Untuk iklan: tidak perlu upload file, langsung simpan data sebagai pembelian
                 data.fileUrl = ''; // Tidak ada URL file
 
                 // Simpan data iklan ke Google Sheets sebagai pembelian
-                rowNumber = await sheetsService.savePembelian(data);
+                rowNumber = await sheetsService.savePembelian(data, groupConfig);
             } else { // pembelian
                 // Untuk pembelian: Upload file ke Google Drive sama seperti penjualan
-                let uploadResult = memoryCache.get(`file_${fileId}`);
+                const fileLink = await ctx.telegram.getFileLink(fileId);
+                const response = await fetch(fileLink);
+                const fileBuffer = Buffer.from(await response.arrayBuffer());
 
-                if (!uploadResult) {
-                    const fileLink = await ctx.telegram.getFileLink(fileId);
-                    const response = await fetch(fileLink);
-                    const fileBuffer = Buffer.from(await response.arrayBuffer());
+                const optimizedBuffer = optimizeFileProcessing(fileBuffer, mimeType);
 
-                    const optimizedBuffer = optimizeFileProcessing(fileBuffer, mimeType);
-
-                    uploadResult = await driveService.uploadFile(optimizedBuffer, mimeType, fileName);
-                    memoryCache.set(`file_${fileId}`, uploadResult, 3600);
-                }
+                const uploadResult = await driveService.uploadFile(optimizedBuffer, mimeType, fileName, groupConfig);
 
                 // Tambahkan URL file ke data
                 data.fileUrl = uploadResult.url;
 
                 // Simpan data pembelian ke Google Sheets
-                rowNumber = await sheetsService.savePembelian(data);
+                rowNumber = await sheetsService.savePembelian(data, groupConfig);
             }
 
             try {
@@ -537,6 +533,7 @@ bot.on(['photo', 'document'], async(ctx) => {
             await ctx.replyWithMarkdown(konfirmasi, {
                 reply_to_message_id: ctx.message.message_id
             });
+
         } catch (error) {
             try {
                 await ctx.telegram.deleteMessage(ctx.chat.id, statusMessage.message_id);
@@ -574,6 +571,9 @@ async function formatAndSendPendingInvoices(ctx, pendingInvoices, isReply = true
     const invoicesBySupplier = {};
     let totalNominalAll = 0;
 
+    // Dapatkan konfigurasi grup
+    const groupConfig = ctx.groupConfig;
+
     pendingInvoices.forEach((invoice) => {
         const supplier = invoice.supplier || 'Lainnya';
         const nominal = invoice.nominal || 0;
@@ -592,6 +592,7 @@ async function formatAndSendPendingInvoices(ctx, pendingInvoices, isReply = true
 
     // Format pesan untuk notifikasi - lebih mudah dibaca
     let message = `📋 *DAFTAR INVOICE BELUM LUNAS*\n`;
+    message += `📍 Grup: *${groupConfig.name}*\n`;
 
     // Urutkan supplier berdasarkan abjad
     const sortedSuppliers = Object.keys(invoicesBySupplier).sort();
@@ -636,10 +637,11 @@ async function formatAndSendPendingInvoices(ctx, pendingInvoices, isReply = true
         // Jika pesan terlalu panjang, pecah menjadi beberapa bagian
         if (error.description && error.description.includes('message is too long')) {
             // Kirim header terlebih dahulu
-            await ctx.telegram.sendMessage(ctx.chat.id, '📋 *DAFTAR INVOICE BELUM LUNAS*', {
-                parse_mode: 'Markdown',
-                reply_to_message_id: isReply ? ctx.message.message_id : undefined
-            });
+            await ctx.telegram.sendMessage(ctx.chat.id,
+                `📋 *DAFTAR INVOICE BELUM LUNAS*\n📍 Grup: *${groupConfig.name}*`, {
+                    parse_mode: 'Markdown',
+                    reply_to_message_id: isReply ? ctx.message.message_id : undefined
+                });
 
             // Kirim data per supplier dengan format ringkas
             for (const supplier of sortedSuppliers) {
@@ -680,8 +682,11 @@ bot.command('invoicebelumlunas', async(ctx) => {
             reply_to_message_id: ctx.message.message_id
         });
 
+        // Dapatkan konfigurasi grup
+        const groupConfig = ctx.groupConfig;
+
         // Dapatkan daftar invoice yang belum lunas
-        const pendingInvoices = await sheetsService.getPendingInvoices();
+        const pendingInvoices = await sheetsService.getPendingInvoices(groupConfig);
 
         // Hapus pesan status
         try {
@@ -715,8 +720,11 @@ bot.command('belumlunas', async(ctx) => {
             reply_to_message_id: ctx.message.message_id
         });
 
+        // Dapatkan konfigurasi grup
+        const groupConfig = ctx.groupConfig;
+
         // Dapatkan daftar invoice yang belum lunas
-        const pendingInvoices = await sheetsService.getPendingInvoices();
+        const pendingInvoices = await sheetsService.getPendingInvoices(groupConfig);
 
         // Hapus pesan status
         try {
@@ -746,7 +754,10 @@ bot.command('belumlunas', async(ctx) => {
 // Command untuk mendapatkan link Google Spreadsheet
 bot.command('linksheet', async(ctx) => {
     try {
-        const sheetUrl = `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}`;
+        // Dapatkan konfigurasi grup
+        const groupConfig = ctx.groupConfig;
+
+        const sheetUrl = `https://docs.google.com/spreadsheets/d/${groupConfig.spreadsheetId}`;
 
         // Kirim link sebagai pesan dengan format Markdown
         await ctx.telegram.sendMessage(ctx.chat.id, `🔗 *Link Google Spreadsheet*\n\n[Buka Spreadsheet](${sheetUrl})`, {
@@ -767,7 +778,10 @@ bot.command('linksheet', async(ctx) => {
 // Command untuk mendapatkan link Google Drive
 bot.command('linkdrive', async(ctx) => {
     try {
-        ctx.replyWithMarkdown(`🗂 [Folder Google Drive](https://drive.google.com/drive/folders/${config.driveFolderId})`, {
+        // Dapatkan konfigurasi grup
+        const groupConfig = ctx.groupConfig;
+
+        ctx.replyWithMarkdown(`🗂 [Folder Google Drive](https://drive.google.com/drive/folders/${groupConfig.driveFolderId})`, {
             reply_to_message_id: ctx.message.message_id
         });
         Logger.info(`User ${getSenderName(ctx)} meminta link Google Drive`);
@@ -917,113 +931,145 @@ bot.catch((err, ctx) => {
 // Fungsi untuk mengirim notifikasi invoice yang belum lunas (format ringkas)
 async function sendPendingInvoicesNotification() {
     try {
-        if (!config.notification.enabled || !config.notification.chatId) {
+        if (!config.notification.enabled) {
             return;
         }
 
         Logger.info('Memulai pengecekan invoice yang belum lunas...');
 
-        // Dapatkan daftar invoice yang belum lunas
-        const pendingInvoices = await sheetsService.getPendingInvoices();
+        // Iterasi setiap grup
+        for (const groupId in config.groups) {
+            const groupConfig = config.groups[groupId];
 
-        if (pendingInvoices.length === 0) {
-            Logger.info('Tidak ada invoice yang belum lunas.');
-            return;
-        }
-
-        // Kelompokkan invoice berdasarkan supplier
-        const invoicesBySupplier = {};
-        let totalNominalAll = 0;
-
-        pendingInvoices.forEach((invoice) => {
-            const supplier = invoice.supplier || 'Lainnya';
-            const nominal = invoice.nominal || 0;
-
-            if (!invoicesBySupplier[supplier]) {
-                invoicesBySupplier[supplier] = {
-                    invoices: [],
-                    totalNominal: 0
-                };
+            // Skip jika grup tidak memiliki topic ID untuk notifikasi
+            if (!groupConfig.notificationTopicId) {
+                continue;
             }
 
-            invoicesBySupplier[supplier].invoices.push(invoice);
-            invoicesBySupplier[supplier].totalNominal += nominal;
-            totalNominalAll += nominal;
-        });
+            try {
+                // Dapatkan daftar invoice yang belum lunas untuk grup ini
+                const pendingInvoices = await sheetsService.getPendingInvoices(groupConfig);
 
-        // Format pesan untuk notifikasi - lebih mudah dibaca
-        let message = `📋 *DAFTAR INVOICE BELUM LUNAS*\n`;
-
-        // Urutkan supplier berdasarkan abjad
-        const sortedSuppliers = Object.keys(invoicesBySupplier).sort();
-
-        sortedSuppliers.forEach((supplier, index) => {
-            const supplierData = invoicesBySupplier[supplier];
-
-            message += `\n👨‍💼 *${supplier}*\n`;
-            message += `💰 Total: *Rp ${supplierData.totalNominal.toLocaleString('id-ID')}*\n`;
-
-            supplierData.invoices.forEach((invoice, idx) => {
-                // Format yang lebih mudah dibaca dengan emoji dan penggantian baris yang lebih jelas
-                message += `${idx + 1}. \`${invoice.invoiceNumber}\` (${invoice.date})\n`;
-                message += `   💵 Rp ${invoice.nominal.toLocaleString('id-ID')}\n`;
-                message += `   📝 ${invoice.description}\n`;
-            });
-
-            // Tambahkan pemisah antar supplier yang lebih jelas
-            if (index < sortedSuppliers.length - 1) {
-                message += `\n${'─'.repeat(18)}\n`;
-            }
-        });
-
-        // Tambahkan total nominal keseluruhan dengan format ringkas namun jelas
-        message += `\n${'═'.repeat(25)}\n`;
-        message += `💵 *TOTAL KESELURUHAN:*\n*Rp ${totalNominalAll.toLocaleString('id-ID')}*\n`;
-        message += `📊 Jumlah invoice: ${pendingInvoices.length}`;
-
-        // Kirim pesan notifikasi
-        try {
-            await bot.telegram.sendMessage(config.notification.chatId, message, {
-                parse_mode: 'Markdown'
-            });
-            Logger.success(`Notifikasi ${pendingInvoices.length} invoice belum lunas berhasil dikirim ke chat ID: ${config.notification.chatId}`);
-        } catch (error) {
-            // Jika pesan terlalu panjang, pecah menjadi beberapa bagian
-            if (error.description && error.description.includes('message is too long')) {
-                // Kirim header terlebih dahulu
-                await bot.telegram.sendMessage(config.notification.chatId, '📋 *DAFTAR INVOICE BELUM LUNAS*', {
-                    parse_mode: 'Markdown'
-                });
-
-                // Kirim data per supplier dengan format ringkas
-                for (const supplier of sortedSuppliers) {
-                    const supplierData = invoicesBySupplier[supplier];
-                    let supplierMessage = `👨‍💼 *${supplier}*\n`;
-                    supplierMessage += `💰 Total: *Rp ${supplierData.totalNominal.toLocaleString('id-ID')}*\n\n`;
-
-                    supplierData.invoices.forEach((invoice, idx) => {
-                        supplierMessage += `${idx + 1}. \`${invoice.invoiceNumber}\` (${invoice.date})\n`;
-                        supplierMessage += `   💵 Rp ${invoice.nominal.toLocaleString('id-ID')}\n`;
-                        supplierMessage += `   📝 ${invoice.description}\n\n`;
-                    });
-
-                    await bot.telegram.sendMessage(config.notification.chatId, supplierMessage, {
-                        parse_mode: 'Markdown'
-                    });
+                if (pendingInvoices.length === 0) {
+                    Logger.info(`Tidak ada invoice yang belum lunas untuk grup ${groupConfig.name}`);
+                    continue;
                 }
 
-                // Kirim summary ringkas
-                let summaryMessage = `\n${'═'.repeat(25)}\n`;
-                summaryMessage += `💵 *TOTAL KESELURUHAN:*\n*Rp ${totalNominalAll.toLocaleString('id-ID')}*\n`;
-                summaryMessage += `📊 Jumlah invoice: ${pendingInvoices.length}`;
+                // Kelompokkan invoice berdasarkan supplier
+                const invoicesBySupplier = {};
+                let totalNominalAll = 0;
 
-                await bot.telegram.sendMessage(config.notification.chatId, summaryMessage, {
-                    parse_mode: 'Markdown'
+                pendingInvoices.forEach((invoice) => {
+                    const supplier = invoice.supplier || 'Lainnya';
+                    const nominal = invoice.nominal || 0;
+
+                    if (!invoicesBySupplier[supplier]) {
+                        invoicesBySupplier[supplier] = {
+                            invoices: [],
+                            totalNominal: 0
+                        };
+                    }
+
+                    invoicesBySupplier[supplier].invoices.push(invoice);
+                    invoicesBySupplier[supplier].totalNominal += nominal;
+                    totalNominalAll += nominal;
                 });
 
-                Logger.success(`Notifikasi ${pendingInvoices.length} invoice belum lunas berhasil dikirim ke chat ID: ${config.notification.chatId} (dalam beberapa bagian)`);
-            } else {
-                throw error;
+                // Format pesan untuk notifikasi - lebih mudah dibaca
+                let message = `📋 *DAFTAR INVOICE BELUM LUNAS*\n`;
+                message += `📍 Grup: *${groupConfig.name}*\n`;
+
+                // Urutkan supplier berdasarkan abjad
+                const sortedSuppliers = Object.keys(invoicesBySupplier).sort();
+
+                sortedSuppliers.forEach((supplier, index) => {
+                    const supplierData = invoicesBySupplier[supplier];
+
+                    message += `\n👨‍💼 *${supplier}*\n`;
+                    message += `💰 Total: *Rp ${supplierData.totalNominal.toLocaleString('id-ID')}*\n`;
+
+                    supplierData.invoices.forEach((invoice, idx) => {
+                        // Format yang lebih mudah dibaca dengan emoji dan penggantian baris yang lebih jelas
+                        message += `${idx + 1}. \`${invoice.invoiceNumber}\` (${invoice.date})\n`;
+                        message += `   💵 Rp ${invoice.nominal.toLocaleString('id-ID')}\n`;
+                        message += `   📝 ${invoice.description}\n`;
+                    });
+
+                    // Tambahkan pemisah antar supplier yang lebih jelas
+                    if (index < sortedSuppliers.length - 1) {
+                        message += `\n${'─'.repeat(18)}\n`;
+                    }
+                });
+
+                // Tambahkan total nominal keseluruhan dengan format ringkas namun jelas
+                message += `\n${'═'.repeat(25)}\n`;
+                message += `💵 *TOTAL KESELURUHAN:*\n*Rp ${totalNominalAll.toLocaleString('id-ID')}*\n`;
+                message += `📊 Jumlah invoice: ${pendingInvoices.length}`;
+
+                // Kirim pesan notifikasi ke topic grup
+                try {
+                    await bot.telegram.sendMessage(
+                        groupId,
+                        message, {
+                            parse_mode: 'Markdown',
+                            message_thread_id: groupConfig.notificationTopicId
+                        }
+                    );
+
+                    Logger.success(`Notifikasi ${pendingInvoices.length} invoice belum lunas berhasil dikirim ke grup ${groupConfig.name}`);
+                } catch (error) {
+                    // Jika pesan terlalu panjang, pecah menjadi beberapa bagian
+                    if (error.description && error.description.includes('message is too long')) {
+                        // Kirim header terlebih dahulu
+                        await bot.telegram.sendMessage(
+                            groupId,
+                            `📋 *DAFTAR INVOICE BELUM LUNAS*\n📍 Grup: *${groupConfig.name}*`, {
+                                parse_mode: 'Markdown',
+                                message_thread_id: groupConfig.notificationTopicId
+                            }
+                        );
+
+                        // Kirim data per supplier dengan format ringkas
+                        for (const supplier of sortedSuppliers) {
+                            const supplierData = invoicesBySupplier[supplier];
+                            let supplierMessage = `👨‍💼 *${supplier}*\n`;
+                            supplierMessage += `💰 Total: *Rp ${supplierData.totalNominal.toLocaleString('id-ID')}*\n\n`;
+
+                            supplierData.invoices.forEach((invoice, idx) => {
+                                supplierMessage += `${idx + 1}. \`${invoice.invoiceNumber}\` (${invoice.date})\n`;
+                                supplierMessage += `   💵 Rp ${invoice.nominal.toLocaleString('id-ID')}\n`;
+                                supplierMessage += `   📝 ${invoice.description}\n\n`;
+                            });
+
+                            await ctx.telegram.sendMessage(
+                                groupId,
+                                supplierMessage, {
+                                    parse_mode: 'Markdown',
+                                    message_thread_id: groupConfig.notificationTopicId
+                                }
+                            );
+                        }
+
+                        // Kirim summary ringkas
+                        let summaryMessage = `\n${'═'.repeat(25)}\n`;
+                        summaryMessage += `💵 *TOTAL KESELURUHAN:*\n*Rp ${totalNominalAll.toLocaleString('id-ID')}*\n`;
+                        summaryMessage += `📊 Jumlah invoice: ${pendingInvoices.length}`;
+
+                        await ctx.telegram.sendMessage(
+                            groupId,
+                            summaryMessage, {
+                                parse_mode: 'Markdown',
+                                message_thread_id: groupConfig.notificationTopicId
+                            }
+                        );
+
+                        Logger.success(`Notifikasi ${pendingInvoices.length} invoice belum lunas berhasil dikirim ke grup ${groupConfig.name} (dalam beberapa bagian)`);
+                    } else {
+                        throw error;
+                    }
+                }
+            } catch (error) {
+                Logger.error(`Gagal mengirim notifikasi ke grup ${groupConfig.name}:`, error);
             }
         }
     } catch (error) {
@@ -1121,6 +1167,9 @@ async function handlePelunasanWithFile(ctx) {
         const caption = ctx.message.caption;
         const data = parseUpdateStatusMessage(caption);
 
+        // Dapatkan konfigurasi grup
+        const groupConfig = ctx.groupConfig;
+
         if (!data) {
             ctx.reply('❌ Format pesan tidak valid. Gunakan format:\n/pelunasan\n[nomor invoice/VA]', {
                 reply_to_message_id: ctx.message.message_id
@@ -1150,7 +1199,7 @@ async function handlePelunasanWithFile(ctx) {
         // Cari transaksi yang akan dilunasi
         let invoice;
         try {
-            invoice = await sheetsService.findInvoice(data.noInvoice);
+            invoice = await sheetsService.findInvoice(data.noInvoice, groupConfig);
             if (!invoice) {
                 ctx.reply(`❌ Transaksi dengan Nomor: ${data.noInvoice} tidak ditemukan.`, {
                     reply_to_message_id: ctx.message.message_id
@@ -1194,12 +1243,12 @@ async function handlePelunasanWithFile(ctx) {
             fileId = ctx.message.document.file_id;
             mimeType = ctx.message.document.mime_type;
             const originalExt = path.extname(ctx.message.document.file_name);
-            fileName = `B.${formattedDate}.${data.noInvoice}.${supplierName}-TF${originalExt}`;
+            fileName = `B.${formattedDate}.${data.noInvoice}.${supplierName}-${groupConfig.name}-TF${originalExt}`;
         } else if (ctx.message.photo) {
             const photo = ctx.message.photo[ctx.message.photo.length - 1];
             fileId = photo.file_id;
             mimeType = 'image/jpeg';
-            fileName = `B.${formattedDate}.${data.noInvoice}.${supplierName}-TF.jpg`;
+            fileName = `B.${formattedDate}.${data.noInvoice}.${supplierName}-${groupConfig.name}-TF.jpg`;
         }
 
         const statusMessage = await ctx.reply('⏳ Memproses pelunasan...', {
@@ -1228,10 +1277,10 @@ async function handlePelunasanWithFile(ctx) {
 
             const optimizedBuffer = optimizeFileProcessing(fileBuffer, mimeType);
 
-            const uploadResult = await driveService.uploadFile(optimizedBuffer, mimeType, fileName);
+            const uploadResult = await driveService.uploadFile(optimizedBuffer, mimeType, fileName, groupConfig);
 
             // Update status transaksi menjadi lunas
-            const rowIndex = await sheetsService.updatePurchaseStatus(data.noInvoice, uploadResult.url, data.pengirim, waktuUpdate);
+            const rowIndex = await sheetsService.updatePurchaseStatus(data.noInvoice, uploadResult.url, data.pengirim, waktuUpdate, groupConfig);
 
             try {
                 await ctx.telegram.deleteMessage(ctx.chat.id, statusMessage.message_id);
@@ -1260,9 +1309,14 @@ async function handlePelunasanWithFile(ctx) {
                 pengirimAsli = usernameMatch ? usernameMatch[1] : '';
             }
 
+            // Cek apakah ini transaksi iklan dari keterangan
+            const isIklan = invoice.data[3].toLowerCase().includes('iklan');
+
             // Kirim konfirmasi pelunasan
             let pelunasanMessage = `✅ Pelunasan untuk transaksi *${escapeMarkdown(data.noInvoice)}*${nominalText} berhasil dicatat.`;
-            if (pengirimAsli) {
+
+            // Tambahkan instruksi /invoiceiklan hanya jika ini transaksi iklan
+            if (isIklan && pengirimAsli) {
                 pelunasanMessage += `\n\n${pengirimAsli} silahkan kirim invoice iklan dengan menggunakan command berikut:\n\`\`\`\n/invoiceiklan\n${data.noInvoice}\n\`\`\``;
             }
 
@@ -1299,6 +1353,9 @@ async function handlePelunasanMassalWithFile(ctx) {
     try {
         const caption = ctx.message.caption;
         const data = parseUpdateStatusBatchMessage(caption);
+
+        // Dapatkan konfigurasi grup
+        const groupConfig = ctx.groupConfig;
 
         if (!data) {
             ctx.reply('❌ Format pesan tidak valid. Gunakan format:\n/pelunasanmassal\nNOINV1\nNOINV2\nNOINV3\n...', {
@@ -1338,7 +1395,7 @@ async function handlePelunasanMassalWithFile(ctx) {
         // Kumpulkan semua invoice dan periksa supplier
         for (const invoiceNumber of data.invoices) {
             try {
-                const invoice = await sheetsService.findInvoice(invoiceNumber);
+                const invoice = await sheetsService.findInvoice(invoiceNumber, groupConfig);
 
                 if (!invoice) {
                     invalidInvoices.push(`${invoiceNumber} (tidak ditemukan)`);
@@ -1414,7 +1471,7 @@ async function handlePelunasanMassalWithFile(ctx) {
                 // Jika gagal membalas, coba kirim pesan baru tanpa reply
                 Logger.error(`Gagal mengirim balasan: ${replyError.message}`);
                 try {
-                    ctx.reply(`❌ Tidak ada invoice valid untuk dilunasi.`);
+                    await ctx.reply(`❌ Tidak ada invoice valid untuk dilunasi.`);
                 } catch (sendError) {
                     Logger.error(`Gagal mengirim pesan: ${sendError.message}`);
                 }
@@ -1448,12 +1505,12 @@ async function handlePelunasanMassalWithFile(ctx) {
             fileId = ctx.message.document.file_id;
             mimeType = ctx.message.document.mime_type;
             const originalExt = path.extname(ctx.message.document.file_name);
-            fileName = `B.${formattedDate}.REKAP-PEMBAYARAN.${normalizedSupplierName}-TF${originalExt}`;
+            fileName = `B.${formattedDate}.REKAP-PEMBAYARAN.${normalizedSupplierName}-${groupConfig.name}-TF${originalExt}`;
         } else if (ctx.message.photo) {
             const photo = ctx.message.photo[ctx.message.photo.length - 1];
             fileId = photo.file_id;
             mimeType = 'image/jpeg';
-            fileName = `B.${formattedDate}.REKAP-PEMBAYARAN.${normalizedSupplierName}-TF.jpg`;
+            fileName = `B.${formattedDate}.REKAP-PEMBAYARAN.${normalizedSupplierName}-${groupConfig.name}-TF.jpg`;
         }
 
         const statusMessage = statusCheckMessage;
@@ -1466,11 +1523,11 @@ async function handlePelunasanMassalWithFile(ctx) {
 
             const optimizedBuffer = optimizeFileProcessing(fileBuffer, mimeType);
 
-            const uploadResult = await driveService.uploadFile(optimizedBuffer, mimeType, fileName);
+            const uploadResult = await driveService.uploadFile(optimizedBuffer, mimeType, fileName, groupConfig);
 
             // Kita sudah memfilter invoice yang valid pada tahap validasi,
             // jadi kita hanya melunasi invoice yang memiliki supplier sama
-            const results = await sheetsService.updatePurchaseStatusBatch(data.invoices, data.pengirim, uploadResult.url);
+            const results = await sheetsService.updatePurchaseStatusBatch(data.invoices, data.pengirim, uploadResult.url, groupConfig);
 
             try {
                 await ctx.telegram.deleteMessage(ctx.chat.id, statusMessage.message_id);
@@ -1493,12 +1550,11 @@ async function handlePelunasanMassalWithFile(ctx) {
                 message.push(`⚠️ ${results.alreadyPaid.length} invoice sudah lunas sebelumnya: ${results.alreadyPaid.join(', ')}`);
             }
 
-            // Menghapus bagian reminder untuk pengirim asli
-
             try {
                 await ctx.replyWithMarkdown(message.join('\n'), {
                     reply_to_message_id: ctx.message.message_id
                 });
+
             } catch (replyError) {
                 // Jika gagal membalas, coba kirim pesan baru tanpa reply
                 Logger.error(`Gagal mengirim balasan: ${replyError.message}`);
@@ -1529,7 +1585,7 @@ async function handlePelunasanMassalWithFile(ctx) {
                 try {
                     await ctx.reply(`❌ Terjadi kesalahan saat memproses pelunasan massal: ${error.message}`);
                 } catch (sendError) {
-                    Logger.error(`Gagal mengirim pesan error: ${sendError.message}`);
+                    Logger.error(`Gagal mengirim pesan: ${sendError.message}`);
                 }
             }
         }

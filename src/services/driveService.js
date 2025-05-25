@@ -9,7 +9,6 @@ const Logger = require('../utils/logger');
 
 class DriveService {
     constructor() {
-        this.folderId = config.driveFolderId;
         this.isInitialized = false;
     }
 
@@ -35,7 +34,7 @@ class DriveService {
     }
 
     // Mengupload file ke Google Drive
-    async uploadFile(fileBuffer, mimeType, fileName) {
+    async uploadFile(fileBuffer, mimeType, fileName, groupConfig) {
         try {
             if (!this.isInitialized) await this.init();
 
@@ -45,7 +44,7 @@ class DriveService {
 
             const fileMetadata = {
                 name: fileName,
-                parents: [this.folderId]
+                parents: [groupConfig.driveFolderId]
             };
 
             const media = {
@@ -73,7 +72,7 @@ class DriveService {
     }
 
     // Mengcopy file di Google Drive dengan nama baru
-    async copyFile(fileId, newFileName) {
+    async copyFile(fileId, newFileName, groupConfig) {
         try {
             if (!this.isInitialized) await this.init();
 
@@ -81,7 +80,7 @@ class DriveService {
                 fileId: fileId,
                 resource: {
                     name: newFileName,
-                    parents: [this.folderId]
+                    parents: [groupConfig.driveFolderId]
                 },
                 fields: 'id, webViewLink'
             });

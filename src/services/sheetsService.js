@@ -6,11 +6,7 @@ const Logger = require('../utils/logger');
 
 class SheetsService {
     constructor() {
-        this.spreadsheetId = config.spreadsheetId;
         this.isInitialized = false;
-
-        // Daftar operasi yang sedang berjalan
-        this.pendingOperations = new Map();
     }
 
     // Inisialisasi sheets API
@@ -50,708 +46,340 @@ class SheetsService {
         return `=HYPERLINK("${url}"; "Bukti Transfer")`;
     }
 
-    // Menyimpan transaksi penjualan ke Google Sheets
-    async savePenjualan(data) {
-        if (!this.isInitialized) await this.init();
-
-        // Data untuk disimpan ke Google Sheets
-        // Kolom: Tanggal, Jenis Transaksi, No. Invoice, Keterangan, Supplier, Customer, Nominal, Status, Lampiran, Pengirim, waktu input, waktu update
-        const values = [
-            [
-                data.tanggal,
-                'Penjualan',
-                data.noInvoice,
-                data.keterangan,
-                data.supplier || '', // Kosong untuk penjualan
-                data.customer || '',
-                data.nominal,
-                'Terjual', // Status diubah menjadi "Terjual" untuk penjualan
-                this.createLampiranLink(data.fileUrl),
-                '', // Kolom pengirim dikosongkan karena sudah digabung dengan waktu input
-                data.waktuInput || new Date().toISOString(),
-                '-' // waktu update tidak diperlukan untuk penjualan (menggunakan tanda -)
-            ]
-        ];
-
-        // Buat unique key untuk operasi ini
-        const operationKey = `penjualan_${data.tanggal}_${data.nominal}_${Date.now()}`;
-
-        return new Promise((resolve, reject) => {
-            // Tambahkan ke batch processor untuk meningkatkan performa
-            batchProcessor.add({ values, range: 'Transaksi!A:L', data },
-                async(item) => {
-                    try {
-                        // Simpan ke Google Sheets
-                        const appendResponse = await this.sheets.spreadsheets.values.append({
-                            spreadsheetId: this.spreadsheetId,
-                            range: item.range,
-                            valueInputOption: 'USER_ENTERED', // Penting untuk formula HYPERLINK
-                            insertDataOption: 'INSERT_ROWS', // Tambahkan sebagai baris baru
-                            resource: { values: item.values }
-                        });
-
-                        // Ambil info tentang baris yang baru saja ditambahkan
-                        const updatedRange = appendResponse.data.updates.updatedRange;
-                        const rowIndex = this.getRowIndexFromRange(updatedRange);
-
-                        if (rowIndex !== null) {
-                            // Ambil ID sheet Transaksi
-                            const sheetsResponse = await this.sheets.spreadsheets.get({
-                                spreadsheetId: this.spreadsheetId
-                            });
-
-                            const transaksiSheet = sheetsResponse.data.sheets.find(
-                                sheet => sheet.properties.title === 'Transaksi'
-                            );
-
-                            if (transaksiSheet) {
-                                const sheetId = transaksiSheet.properties.sheetId;
-
-                                // Format styling untuk baris baru
-                                await this.sheets.spreadsheets.batchUpdate({
-                                    spreadsheetId: this.spreadsheetId,
-                                    resource: {
-                                        requests: [
-                                            // Format semua sel di baris dengan teks hitam tanpa bold
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 0,
-                                                        endColumnIndex: 12
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            textFormat: {
-                                                                foregroundColor: {
-                                                                    red: 0,
-                                                                    green: 0,
-                                                                    blue: 0
-                                                                },
-                                                                bold: false
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.textFormat(foregroundColor,bold)'
-                                                }
-                                            },
-                                            // Format khusus untuk kolom Lampiran (index 8) dengan warna biru dan italic
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 8,
-                                                        endColumnIndex: 9
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            textFormat: {
-                                                                foregroundColor: {
-                                                                    red: 0.17,
-                                                                    green: 0.41,
-                                                                    blue: 0.96
-                                                                },
-                                                                italic: true
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.textFormat(foregroundColor,italic)'
-                                                }
-                                            },
-                                            // Format kolom Nominal (index 6) dengan latar belakang hijau muda
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 6,
-                                                        endColumnIndex: 7
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            backgroundColor: {
-                                                                red: 0.85,
-                                                                green: 0.95,
-                                                                blue: 0.85
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.backgroundColor'
-                                                }
-                                            },
-                                            // Align left untuk kolom Keterangan (index 3)
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 3,
-                                                        endColumnIndex: 4
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            horizontalAlignment: 'LEFT'
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.horizontalAlignment'
-                                                }
-                                            },
-                                            // Format warna hijau untuk status Terjual (index 7)
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 7,
-                                                        endColumnIndex: 8
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            textFormat: {
-                                                                foregroundColor: {
-                                                                    red: 0.13,
-                                                                    green: 0.55,
-                                                                    blue: 0.13
-                                                                },
-                                                                bold: true
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.textFormat(foregroundColor,bold)'
-                                                }
-                                            }
-                                        ]
-                                    }
-                                });
-                            }
-                        }
-
-                        return rowIndex || 0;
-                    } catch (error) {
-                        Logger.error('Error menyimpan data penjualan:', error);
-                        throw error;
-                    }
-                },
-                (error, result) => {
-                    if (error) {
-                        reject(error);
-                    } else {
-                        resolve(result);
-                    }
-                }
-            );
-        });
-    }
-
-    // Menyimpan transaksi pembelian ke Google Sheets
-    async savePembelian(data) {
-        if (!this.isInitialized) await this.init();
-
-        // Data untuk disimpan ke Google Sheets
-        // Kolom: Tanggal, Jenis Transaksi, No. Invoice, Keterangan, Supplier, Customer, Nominal, Status, Lampiran, Pengirim, waktu input, waktu update
-        const values = [
-            [
-                data.tanggal,
-                'Pembelian',
-                data.noInvoice,
-                data.keterangan,
-                data.supplier || '',
-                data.customer || '', // Kosong untuk pembelian
-                data.nominal,
-                'Belum Lunas', // Status default untuk pembelian
-                this.createLampiranLink(data.fileUrl), // Lampiran bukti pembelian disimpan seperti penjualan
-                '', // Kolom pengirim dikosongkan karena sudah digabung dengan waktu input
-                data.waktuInput || new Date().toISOString(),
-                '' // waktu update (kosong untuk awal)
-            ]
-        ];
-
-        // Buat unique key untuk operasi ini
-        const operationKey = `pembelian_${data.tanggal}_${data.nominal}_${Date.now()}`;
-
-        return new Promise((resolve, reject) => {
-            // Tambahkan ke batch processor untuk meningkatkan performa
-            batchProcessor.add({ values, range: 'Transaksi!A:L', data },
-                async(item) => {
-                    try {
-                        // Simpan ke Google Sheets
-                        const appendResponse = await this.sheets.spreadsheets.values.append({
-                            spreadsheetId: this.spreadsheetId,
-                            range: item.range,
-                            valueInputOption: 'USER_ENTERED', // Penting untuk formula HYPERLINK
-                            insertDataOption: 'INSERT_ROWS', // Tambahkan sebagai baris baru
-                            resource: { values: item.values }
-                        });
-
-                        // Ambil info tentang baris yang baru saja ditambahkan
-                        const updatedRange = appendResponse.data.updates.updatedRange;
-                        const rowIndex = this.getRowIndexFromRange(updatedRange);
-
-                        if (rowIndex !== null) {
-                            // Ambil ID sheet Transaksi
-                            const sheetsResponse = await this.sheets.spreadsheets.get({
-                                spreadsheetId: this.spreadsheetId
-                            });
-
-                            const transaksiSheet = sheetsResponse.data.sheets.find(
-                                sheet => sheet.properties.title === 'Transaksi'
-                            );
-
-                            if (transaksiSheet) {
-                                const sheetId = transaksiSheet.properties.sheetId;
-
-                                // Format styling untuk baris baru
-                                await this.sheets.spreadsheets.batchUpdate({
-                                    spreadsheetId: this.spreadsheetId,
-                                    resource: {
-                                        requests: [
-                                            // Format semua sel di baris dengan teks hitam tanpa bold
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 0,
-                                                        endColumnIndex: 12
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            textFormat: {
-                                                                foregroundColor: {
-                                                                    red: 0,
-                                                                    green: 0,
-                                                                    blue: 0
-                                                                },
-                                                                bold: false
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.textFormat(foregroundColor,bold)'
-                                                }
-                                            },
-                                            // Format khusus untuk kolom Lampiran (index 8) dengan warna biru dan italic
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 8,
-                                                        endColumnIndex: 9
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            textFormat: {
-                                                                foregroundColor: {
-                                                                    red: 0.17,
-                                                                    green: 0.41,
-                                                                    blue: 0.96
-                                                                },
-                                                                italic: true
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.textFormat(foregroundColor,italic)'
-                                                }
-                                            },
-                                            // Format kolom Nominal (index 6) dengan latar belakang hijau muda
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 6,
-                                                        endColumnIndex: 7
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            backgroundColor: {
-                                                                red: 0.85,
-                                                                green: 0.95,
-                                                                blue: 0.85
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.backgroundColor'
-                                                }
-                                            },
-                                            // Align left untuk kolom Keterangan (index 3)
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 3,
-                                                        endColumnIndex: 4
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            horizontalAlignment: 'LEFT'
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.horizontalAlignment'
-                                                }
-                                            },
-                                            // Format warna merah untuk status Belum Lunas (index 7)
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 7,
-                                                        endColumnIndex: 8
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            textFormat: {
-                                                                foregroundColor: {
-                                                                    red: 0.8,
-                                                                    green: 0.0,
-                                                                    blue: 0.0
-                                                                },
-                                                                bold: true
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.textFormat(foregroundColor,bold)'
-                                                }
-                                            }
-                                        ]
-                                    }
-                                });
-                            }
-                        }
-
-                        return rowIndex || 0;
-                    } catch (error) {
-                        Logger.error('Error menyimpan data pembelian:', error);
-                        throw error;
-                    }
-                },
-                (error, result) => {
-                    if (error) {
-                        reject(error);
-                    } else {
-                        resolve(result);
-                    }
-                }
-            );
-        });
-    }
-
-    // Menyimpan transaksi pembelian langsung dengan status lunas ke Google Sheets
-    async savePembelianLunas(data) {
-        if (!this.isInitialized) await this.init();
-
-        // Format tanggal hari ini untuk digunakan sebagai tanggal pembayaran
-        const today = new Date();
-        const dd = String(today.getDate()).padStart(2, '0');
-        const mm = String(today.getMonth() + 1).padStart(2, '0');
-        const yyyy = today.getFullYear();
-        const tanggalPembayaran = dd + '/' + mm + '/' + yyyy;
-
-        // Data untuk disimpan ke Google Sheets
-        // Kolom: Tanggal (Pembayaran), Jenis Transaksi, No. Invoice, Keterangan, Supplier, Customer, Nominal, Status, Lampiran, Pengirim, waktu input, waktu update
-        const values = [
-            [
-                tanggalPembayaran, // Menggunakan tanggal pembayaran sebagai tanggal transaksi
-                'Pembelian',
-                data.noInvoice,
-                data.keterangan,
-                data.supplier,
-                data.customer || '', // Kosong untuk pembelian
-                data.nominal,
-                'Lunas', // Status langsung Lunas
-                this.createLampiranLink(data.fileUrl),
-                '', // Kolom pengirim dikosongkan karena sudah digabung dengan waktu input
-                data.waktuInput || new Date().toISOString(),
-                '-' // waktu update tidak diperlukan untuk pembelian lunas (menggunakan tanda -)
-            ]
-        ];
-
-        // Buat unique key untuk operasi ini
-        const operationKey = `pembelianlunas_${data.noInvoice}_${Date.now()}`;
-
-        return new Promise((resolve, reject) => {
-            // Tambahkan ke batch processor untuk meningkatkan performa
-            batchProcessor.add({ values, range: 'Transaksi!A:L', data },
-                async(item) => {
-                    try {
-                        // Simpan ke Google Sheets
-                        const appendResponse = await this.sheets.spreadsheets.values.append({
-                            spreadsheetId: this.spreadsheetId,
-                            range: item.range,
-                            valueInputOption: 'USER_ENTERED', // Penting untuk formula HYPERLINK
-                            insertDataOption: 'INSERT_ROWS', // Tambahkan sebagai baris baru
-                            resource: { values: item.values }
-                        });
-
-                        // Ambil info tentang baris yang baru saja ditambahkan
-                        const updatedRange = appendResponse.data.updates.updatedRange;
-                        const rowIndex = this.getRowIndexFromRange(updatedRange);
-
-                        if (rowIndex !== null) {
-                            // Ambil ID sheet Transaksi
-                            const sheetsResponse = await this.sheets.spreadsheets.get({
-                                spreadsheetId: this.spreadsheetId
-                            });
-
-                            const transaksiSheet = sheetsResponse.data.sheets.find(
-                                sheet => sheet.properties.title === 'Transaksi'
-                            );
-
-                            if (transaksiSheet) {
-                                const sheetId = transaksiSheet.properties.sheetId;
-
-                                // Format styling untuk baris baru
-                                await this.sheets.spreadsheets.batchUpdate({
-                                    spreadsheetId: this.spreadsheetId,
-                                    resource: {
-                                        requests: [
-                                            // Format semua sel di baris dengan teks hitam tanpa bold
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 0,
-                                                        endColumnIndex: 12
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            textFormat: {
-                                                                foregroundColor: {
-                                                                    red: 0,
-                                                                    green: 0,
-                                                                    blue: 0
-                                                                },
-                                                                bold: false
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.textFormat(foregroundColor,bold)'
-                                                }
-                                            },
-                                            // Format khusus untuk kolom Lampiran (index 8) dengan warna biru dan italic
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 8,
-                                                        endColumnIndex: 9
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            textFormat: {
-                                                                foregroundColor: {
-                                                                    red: 0.17,
-                                                                    green: 0.41,
-                                                                    blue: 0.96
-                                                                },
-                                                                italic: true
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.textFormat(foregroundColor,italic)'
-                                                }
-                                            },
-                                            // Format kolom Nominal (index 6) dengan latar belakang hijau tua (untuk pembelian lunas)
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 6,
-                                                        endColumnIndex: 7
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            backgroundColor: {
-                                                                red: 0.56,
-                                                                green: 0.76,
-                                                                blue: 0.56
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.backgroundColor'
-                                                }
-                                            },
-                                            // Format kolom Status (index 7) dengan warna hijau dan bold
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 7,
-                                                        endColumnIndex: 8
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            textFormat: {
-                                                                foregroundColor: {
-                                                                    red: 0.13,
-                                                                    green: 0.55,
-                                                                    blue: 0.13
-                                                                },
-                                                                bold: true
-                                                            }
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.textFormat(foregroundColor,bold)'
-                                                }
-                                            },
-                                            // Align left untuk kolom Keterangan (index 3)
-                                            {
-                                                repeatCell: {
-                                                    range: {
-                                                        sheetId: sheetId,
-                                                        startRowIndex: rowIndex - 1,
-                                                        endRowIndex: rowIndex,
-                                                        startColumnIndex: 3,
-                                                        endColumnIndex: 4
-                                                    },
-                                                    cell: {
-                                                        userEnteredFormat: {
-                                                            horizontalAlignment: 'LEFT'
-                                                        }
-                                                    },
-                                                    fields: 'userEnteredFormat.horizontalAlignment'
-                                                }
-                                            }
-                                        ]
-                                    }
-                                });
-                            }
-                        }
-
-                        // Cache hasil operasi
-                        const result = {
-                            success: true,
-                            message: 'Transaksi pembelian lunas berhasil disimpan',
-                            row: rowIndex
-                        };
-
-                        // Selesaikan promise
-                        resolve(result);
-                    } catch (error) {
-                        reject(error);
-                    }
-                },
-                operationKey
-            );
-        });
-    }
-
-    // Helper method untuk mengekstrak nomor baris dari range
+    // Fungsi untuk mendapatkan nomor baris dari range yang diupdate
     getRowIndexFromRange(range) {
         try {
-            if (!range) return null;
-
-            // Range biasanya dalam format seperti "Transaksi!A2:J2"
-            const match = range.match(/[A-Z]+(\d+):/);
-            if (match && match[1]) {
-                return parseInt(match[1]);
+            // Range akan dalam format seperti 'Transaksi!A5:L5'
+            const match = range.match(/\d+/);
+            if (match) {
+                return parseInt(match[0]);
             }
-
-            // Coba format alternatif seperti "Transaksi!A2"
-            const altMatch = range.match(/[A-Z]+(\d+)$/);
-            if (altMatch && altMatch[1]) {
-                return parseInt(altMatch[1]);
-            }
-
             return null;
         } catch (error) {
+            Logger.error('Error saat mengekstrak nomor baris:', error);
             return null;
         }
     }
 
-    // Periksa apakah sheet Transaksi sudah ada
-    async ensureTransactionSheetExists() {
-        try {
-            if (!this.isInitialized) await this.init();
+    // Fungsi untuk memformat tanggal dari DD/MM/YYYY menjadi format Google Sheets (MM/DD/YYYY)
+    formatDateForSheet(dateStr) {
+        if (!dateStr) return '';
+        const [day, month, year] = dateStr.split('/');
+        return `=DATE(${year},${month},${day})`;
+    }
 
-            const response = await this.sheets.spreadsheets.get({
-                spreadsheetId: this.spreadsheetId
+    // Fungsi untuk memformat nominal ke format angka Google Sheets
+    formatNominalForSheet(nominal) {
+        if (!nominal) return '';
+        // Hapus semua karakter non-digit
+        const cleanNumber = nominal.toString().replace(/\D/g, '');
+        // Konversi ke number dan format sebagai angka
+        return Number(cleanNumber);
+    }
+
+    // Menyimpan transaksi penjualan ke Google Sheets
+    async savePenjualan(data, groupConfig) {
+        if (!this.isInitialized) await this.init();
+
+        // Format tanggal dan nominal sebelum disimpan
+        const formattedDate = this.formatDateForSheet(data.tanggal);
+        const formattedNominal = this.formatNominalForSheet(data.nominal);
+
+        // Data untuk disimpan ke Google Sheets
+        const values = [
+            [
+                formattedDate,
+                'Penjualan',
+                data.noInvoice,
+                data.keterangan,
+                data.supplier || '',
+                data.customer || '',
+                formattedNominal,
+                'Terjual',
+                this.createLampiranLink(data.fileUrl),
+                '',
+                data.waktuInput || new Date().toISOString(),
+                '-'
+            ]
+        ];
+
+        try {
+            // Simpan ke Google Sheets dengan format khusus
+            const appendResponse = await this.sheets.spreadsheets.values.append({
+                spreadsheetId: groupConfig.spreadsheetId,
+                range: 'Transaksi!A:L',
+                valueInputOption: 'USER_ENTERED', // Penting: Gunakan USER_ENTERED agar formula dan format dievaluasi
+                insertDataOption: 'INSERT_ROWS',
+                resource: { values }
             });
 
-            const sheetExists = response.data.sheets.some(
-                sheet => sheet.properties.title === 'Transaksi'
-            );
+            // Ambil info tentang baris yang baru saja ditambahkan
+            const updatedRange = appendResponse.data.updates.updatedRange;
+            const rowIndex = this.getRowIndexFromRange(updatedRange);
 
-            if (!sheetExists) {
-                Logger.error('Sheet "Transaksi" tidak ditemukan di spreadsheet!');
-                throw new Error('Sheet "Transaksi" tidak ditemukan');
+            if (rowIndex !== null) {
+                // Ambil ID sheet Transaksi
+                const sheetsResponse = await this.sheets.spreadsheets.get({
+                    spreadsheetId: groupConfig.spreadsheetId
+                });
+
+                const transaksiSheet = sheetsResponse.data.sheets.find(
+                    sheet => sheet.properties.title === 'Transaksi'
+                );
+
+                if (transaksiSheet) {
+                    const sheetId = transaksiSheet.properties.sheetId;
+
+                    // Format styling untuk baris baru
+                    await this.sheets.spreadsheets.batchUpdate({
+                        spreadsheetId: groupConfig.spreadsheetId,
+                        resource: {
+                            requests: [
+                                // Reset format untuk semua kolom
+                                {
+                                    repeatCell: {
+                                        range: {
+                                            sheetId: sheetId,
+                                            startRowIndex: rowIndex - 1,
+                                            endRowIndex: rowIndex,
+                                            startColumnIndex: 0,
+                                            endColumnIndex: 12
+                                        },
+                                        cell: {
+                                            userEnteredFormat: {
+                                                backgroundColor: {
+                                                    red: 1,
+                                                    green: 1,
+                                                    blue: 1
+                                                },
+                                                textFormat: {
+                                                    foregroundColor: {
+                                                        red: 0,
+                                                        green: 0,
+                                                        blue: 0
+                                                    },
+                                                    bold: false
+                                                }
+                                            }
+                                        },
+                                        fields: 'userEnteredFormat(backgroundColor,textFormat)'
+                                    }
+                                },
+                                // Format khusus untuk kolom Nominal (index 6) dengan warna hijau muda
+                                {
+                                    repeatCell: {
+                                        range: {
+                                            sheetId: sheetId,
+                                            startRowIndex: rowIndex - 1,
+                                            endRowIndex: rowIndex,
+                                            startColumnIndex: 6,
+                                            endColumnIndex: 7
+                                        },
+                                        cell: {
+                                            userEnteredFormat: {
+                                                backgroundColor: {
+                                                    red: 0.85,
+                                                    green: 0.92,
+                                                    blue: 0.85
+                                                }
+                                            }
+                                        },
+                                        fields: 'userEnteredFormat.backgroundColor'
+                                    }
+                                },
+                                // Format khusus untuk kolom Lampiran (index 8) dengan warna biru dan italic
+                                {
+                                    repeatCell: {
+                                        range: {
+                                            sheetId: sheetId,
+                                            startRowIndex: rowIndex - 1,
+                                            endRowIndex: rowIndex,
+                                            startColumnIndex: 8,
+                                            endColumnIndex: 9
+                                        },
+                                        cell: {
+                                            userEnteredFormat: {
+                                                textFormat: {
+                                                    foregroundColor: {
+                                                        red: 0.17,
+                                                        green: 0.41,
+                                                        blue: 0.96
+                                                    },
+                                                    italic: true
+                                                }
+                                            }
+                                        },
+                                        fields: 'userEnteredFormat.textFormat(foregroundColor,italic)'
+                                    }
+                                }
+                            ]
+                        }
+                    });
+                }
             }
 
-            // Periksa dan pastikan header untuk kolom "Waktu Update" ada
-            await this.ensureUpdateTimeHeaderExists();
-
-            return true;
+            return rowIndex || 0;
         } catch (error) {
-            Logger.error('Gagal memeriksa sheet Transaksi', error);
+            Logger.error('Error menyimpan data penjualan:', error);
             throw error;
         }
     }
 
-    // Memastikan header untuk kolom Waktu Update ada
-    async ensureUpdateTimeHeaderExists() {
+    // Menyimpan transaksi pembelian ke Google Sheets
+    async savePembelian(data, groupConfig) {
+        if (!this.isInitialized) await this.init();
+
+        // Format tanggal dan nominal sebelum disimpan
+        const formattedDate = this.formatDateForSheet(data.tanggal);
+        const formattedNominal = this.formatNominalForSheet(data.nominal);
+
+        // Data untuk disimpan ke Google Sheets
+        const values = [
+            [
+                formattedDate,
+                'Pembelian',
+                data.noInvoice,
+                data.keterangan,
+                data.supplier || '',
+                data.customer || '',
+                formattedNominal,
+                'Belum Lunas',
+                this.createLampiranLink(data.fileUrl),
+                '',
+                data.waktuInput || new Date().toISOString(),
+                ''
+            ]
+        ];
+
         try {
-            const response = await this.sheets.spreadsheets.values.get({
-                spreadsheetId: this.spreadsheetId,
-                range: 'Transaksi!A1:L1'
+            // Simpan ke Google Sheets dengan format khusus
+            const appendResponse = await this.sheets.spreadsheets.values.append({
+                spreadsheetId: groupConfig.spreadsheetId,
+                range: 'Transaksi!A:L',
+                valueInputOption: 'USER_ENTERED', // Penting: Gunakan USER_ENTERED agar formula dan format dievaluasi
+                insertDataOption: 'INSERT_ROWS',
+                resource: { values }
             });
 
-            if (!response.data.values || !response.data.values[0]) {
-                return; // Tidak ada header sama sekali
-            }
+            // Ambil info tentang baris yang baru saja ditambahkan
+            const updatedRange = appendResponse.data.updates.updatedRange;
+            const rowIndex = this.getRowIndexFromRange(updatedRange);
 
-            const headers = response.data.values[0];
-
-            // Jika kolom L belum ada atau bukan "Waktu Update"
-            if (headers.length < 12 || (headers.length >= 12 && headers[11] !== 'waktu update')) {
-                // Tambahkan header "waktu update" di kolom L
-                await this.sheets.spreadsheets.values.update({
-                    spreadsheetId: this.spreadsheetId,
-                    range: 'Transaksi!L1',
-                    valueInputOption: 'RAW',
-                    resource: {
-                        values: [
-                            ['waktu update']
-                        ]
-                    }
+            if (rowIndex !== null) {
+                // Ambil ID sheet Transaksi
+                const sheetsResponse = await this.sheets.spreadsheets.get({
+                    spreadsheetId: groupConfig.spreadsheetId
                 });
 
-                Logger.info('Header "waktu update" ditambahkan ke spreadsheet');
+                const transaksiSheet = sheetsResponse.data.sheets.find(
+                    sheet => sheet.properties.title === 'Transaksi'
+                );
+
+                if (transaksiSheet) {
+                    const sheetId = transaksiSheet.properties.sheetId;
+
+                    // Format styling untuk baris baru
+                    await this.sheets.spreadsheets.batchUpdate({
+                        spreadsheetId: groupConfig.spreadsheetId,
+                        resource: {
+                            requests: [
+                                // Reset format untuk semua kolom
+                                {
+                                    repeatCell: {
+                                        range: {
+                                            sheetId: sheetId,
+                                            startRowIndex: rowIndex - 1,
+                                            endRowIndex: rowIndex,
+                                            startColumnIndex: 0,
+                                            endColumnIndex: 12
+                                        },
+                                        cell: {
+                                            userEnteredFormat: {
+                                                backgroundColor: {
+                                                    red: 1,
+                                                    green: 1,
+                                                    blue: 1
+                                                },
+                                                textFormat: {
+                                                    foregroundColor: {
+                                                        red: 0,
+                                                        green: 0,
+                                                        blue: 0
+                                                    },
+                                                    bold: false
+                                                }
+                                            }
+                                        },
+                                        fields: 'userEnteredFormat(backgroundColor,textFormat)'
+                                    }
+                                },
+                                // Format khusus untuk kolom Nominal (index 6) dengan warna hijau muda
+                                {
+                                    repeatCell: {
+                                        range: {
+                                            sheetId: sheetId,
+                                            startRowIndex: rowIndex - 1,
+                                            endRowIndex: rowIndex,
+                                            startColumnIndex: 6,
+                                            endColumnIndex: 7
+                                        },
+                                        cell: {
+                                            userEnteredFormat: {
+                                                backgroundColor: {
+                                                    red: 0.85,
+                                                    green: 0.92,
+                                                    blue: 0.85
+                                                }
+                                            }
+                                        },
+                                        fields: 'userEnteredFormat.backgroundColor'
+                                    }
+                                },
+                                // Format khusus untuk kolom Lampiran (index 8) dengan warna biru dan italic
+                                {
+                                    repeatCell: {
+                                        range: {
+                                            sheetId: sheetId,
+                                            startRowIndex: rowIndex - 1,
+                                            endRowIndex: rowIndex,
+                                            startColumnIndex: 8,
+                                            endColumnIndex: 9
+                                        },
+                                        cell: {
+                                            userEnteredFormat: {
+                                                textFormat: {
+                                                    foregroundColor: {
+                                                        red: 0.17,
+                                                        green: 0.41,
+                                                        blue: 0.96
+                                                    },
+                                                    italic: true
+                                                }
+                                            }
+                                        },
+                                        fields: 'userEnteredFormat.textFormat(foregroundColor,italic)'
+                                    }
+                                }
+                            ]
+                        }
+                    });
+                }
             }
+
+            return rowIndex || 0;
         } catch (error) {
-            Logger.error('Gagal memeriksa header waktu update', error);
-            // Lanjutkan saja, tidak perlu gagal total jika hanya header yang bermasalah
+            Logger.error('Error menyimpan data pembelian:', error);
+            throw error;
         }
     }
 
-    // Mencari baris transaksi pembelian berdasarkan nomor invoice atau nomor VA
-    async findPurchaseByInvoice(invoiceNumber) {
+    // Mencari transaksi pembelian berdasarkan nomor invoice atau nomor VA
+    async findPurchaseByInvoice(invoiceNumber, groupConfig) {
         try {
             if (!this.isInitialized) await this.init();
 
             const response = await this.sheets.spreadsheets.values.get({
-                spreadsheetId: this.spreadsheetId,
+                spreadsheetId: groupConfig.spreadsheetId,
                 range: 'Transaksi!A:L',
                 valueRenderOption: 'FORMULA' // Mendapatkan formula seperti HYPERLINK bukan nilai yang ditampilkan
             });
@@ -790,13 +418,14 @@ class SheetsService {
     }
 
     // Mencari apakah nomor invoice/VA sudah ada di spreadsheet (penjualan atau pembelian)
-    async findInvoice(invoiceNumber) {
+    async findInvoice(invoiceNumber, groupConfig) {
         try {
             if (!this.isInitialized) await this.init();
 
             const response = await this.sheets.spreadsheets.values.get({
-                spreadsheetId: this.spreadsheetId,
-                range: 'Transaksi!A:L'
+                spreadsheetId: groupConfig.spreadsheetId,
+                range: 'Transaksi!A:L',
+                valueRenderOption: 'FORMULA' // Mengambil formula HYPERLINK yang asli
             });
 
             if (!response.data.values) {
@@ -805,15 +434,20 @@ class SheetsService {
 
             const values = response.data.values;
 
+            // Pastikan invoiceNumber dalam bentuk string untuk perbandingan yang konsisten
+            const searchInvoice = invoiceNumber.toString().trim();
+
             // Cari baris yang sesuai dengan kriteria:
             // Kolom C (index 2) harus sama dengan invoice/VA yang dicari (tanpa memperhatikan tipe transaksi)
             for (let i = 1; i < values.length; i++) {
                 const row = values[i];
                 // Pastikan baris memiliki cukup kolom
                 if (row && row.length >= 3) {
-                    const invoice = row[2]; // Kolom C: No. Invoice/VA
+                    // Konversi invoice dari sheet ke string dan bersihkan whitespace
+                    const invoice = (row[2] || '').toString().trim();
 
-                    if (invoice === invoiceNumber) {
+                    // Bandingkan dalam bentuk string
+                    if (invoice === searchInvoice) {
                         return {
                             rowIndex: i + 1, // Index baris dalam spreadsheet (1-indexed)
                             data: row
@@ -831,12 +465,12 @@ class SheetsService {
     }
 
     // Mengupdate status pembelian menjadi Lunas
-    async updatePurchaseStatus(invoiceNumber, fileUrl, updaterName, waktuUpdate) {
+    async updatePurchaseStatus(invoiceNumber, fileUrl, updaterName, waktuUpdate, groupConfig) {
         try {
             if (!this.isInitialized) await this.init();
 
             // Cari baris dengan invoice yang dimaksud
-            const purchase = await this.findInvoice(invoiceNumber);
+            const purchase = await this.findInvoice(invoiceNumber, groupConfig);
             if (!purchase) {
                 throw new Error(`Tidak dapat menemukan transaksi dengan nomor: ${invoiceNumber}`);
             }
@@ -851,20 +485,6 @@ class SheetsService {
                 throw new Error(`Transaksi dengan nomor: ${invoiceNumber} sudah berstatus LUNAS`);
             }
 
-            // Ambil waktu saat ini dalam format WIB untuk tanggal update
-            const now = new Date();
-            const optionsDateTime = {
-                timeZone: 'Asia/Jakarta',
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false
-            };
-
-            const waktuBayarLengkap = new Intl.DateTimeFormat('id-ID', optionsDateTime).format(now);
-
             // Update nilai di kolom tertentu:
             // PERUBAHAN: Tanggal asli tetap dipertahankan (tidak diubah)
             // Kolom H (index 7): Status diubah menjadi "Lunas"
@@ -873,7 +493,7 @@ class SheetsService {
             // Kolom K (index 10): Waktu input asli tetap dipertahankan
             // Kolom L (index 11): Waktu update dengan informasi pengirim
             await this.sheets.spreadsheets.values.update({
-                spreadsheetId: this.spreadsheetId,
+                spreadsheetId: groupConfig.spreadsheetId,
                 range: `Transaksi!A${purchase.rowIndex}:L${purchase.rowIndex}`,
                 valueInputOption: 'USER_ENTERED',
                 resource: {
@@ -887,7 +507,7 @@ class SheetsService {
                             purchase.data[5], // Customer
                             purchase.data[6], // Nominal
                             'Lunas', // Status
-                            purchase.data[8], // Lampiran bukti pembelian tetap dipertahankan
+                            purchase.data[8], // Lampiran bukti pembelian tetap dipertahankan dengan formula asli
                             this.createBuktiTransferLink(fileUrl), // Bukti Transfer dengan format hyperlink "Bukti Transfer"
                             purchase.data[10] || '', // Waktu input asli tetap dipertahankan
                             waktuUpdate // Waktu update dengan informasi pengirim
@@ -898,7 +518,7 @@ class SheetsService {
 
             // Update format untuk status "Lunas" (warna hijau)
             const sheetsResponse = await this.sheets.spreadsheets.get({
-                spreadsheetId: this.spreadsheetId
+                spreadsheetId: groupConfig.spreadsheetId
             });
 
             const transaksiSheet = sheetsResponse.data.sheets.find(
@@ -908,9 +528,34 @@ class SheetsService {
             if (transaksiSheet) {
                 const sheetId = transaksiSheet.properties.sheetId;
                 await this.sheets.spreadsheets.batchUpdate({
-                    spreadsheetId: this.spreadsheetId,
+                    spreadsheetId: groupConfig.spreadsheetId,
                     resource: {
                         requests: [
+                            // Format default untuk semua kolom (hitam, tidak bold)
+                            {
+                                repeatCell: {
+                                    range: {
+                                        sheetId: sheetId,
+                                        startRowIndex: purchase.rowIndex - 1,
+                                        endRowIndex: purchase.rowIndex,
+                                        startColumnIndex: 0,
+                                        endColumnIndex: 12
+                                    },
+                                    cell: {
+                                        userEnteredFormat: {
+                                            textFormat: {
+                                                foregroundColor: {
+                                                    red: 0,
+                                                    green: 0,
+                                                    blue: 0
+                                                },
+                                                bold: false
+                                            }
+                                        }
+                                    },
+                                    fields: 'userEnteredFormat.textFormat(foregroundColor,bold)'
+                                }
+                            },
                             // Format khusus untuk kolom Lampiran (index 8) dengan warna biru dan italic
                             {
                                 repeatCell: {
@@ -960,31 +605,6 @@ class SheetsService {
                                     },
                                     fields: 'userEnteredFormat.textFormat(foregroundColor,italic)'
                                 }
-                            },
-                            // Format warna hijau untuk status Lunas (index 7)
-                            {
-                                repeatCell: {
-                                    range: {
-                                        sheetId: sheetId,
-                                        startRowIndex: purchase.rowIndex - 1,
-                                        endRowIndex: purchase.rowIndex,
-                                        startColumnIndex: 7,
-                                        endColumnIndex: 8
-                                    },
-                                    cell: {
-                                        userEnteredFormat: {
-                                            textFormat: {
-                                                foregroundColor: {
-                                                    red: 0.13,
-                                                    green: 0.55,
-                                                    blue: 0.13
-                                                },
-                                                bold: true
-                                            }
-                                        }
-                                    },
-                                    fields: 'userEnteredFormat.textFormat(foregroundColor,bold)'
-                                }
                             }
                         ]
                     }
@@ -999,7 +619,7 @@ class SheetsService {
     }
 
     // Mengupdate status beberapa pembelian sekaligus menjadi Lunas
-    async updatePurchaseStatusBatch(invoiceNumbers, updaterName, fileUrl = null) {
+    async updatePurchaseStatusBatch(invoiceNumbers, updaterName, fileUrl = null, groupConfig) {
         try {
             if (!this.isInitialized) await this.init();
 
@@ -1030,7 +650,7 @@ class SheetsService {
             for (const invoiceNumber of invoiceNumbers) {
                 try {
                     // Cari baris dengan invoice yang dimaksud
-                    const purchase = await this.findPurchaseByInvoice(invoiceNumber);
+                    const purchase = await this.findPurchaseByInvoice(invoiceNumber, groupConfig);
 
                     if (!purchase) {
                         results.notFound.push(invoiceNumber);
@@ -1057,7 +677,7 @@ class SheetsService {
                     // Kolom J (index 9): Link ke bukti transfer jika ada
                     // Kolom L (index 11): Waktu update dengan informasi pengirim
                     await this.sheets.spreadsheets.values.update({
-                        spreadsheetId: this.spreadsheetId,
+                        spreadsheetId: groupConfig.spreadsheetId,
                         range: `Transaksi!A${purchase.rowIndex}:L${purchase.rowIndex}`,
                         valueInputOption: 'USER_ENTERED',
                         resource: {
@@ -1082,7 +702,7 @@ class SheetsService {
 
                     // Update format untuk status "Lunas" (warna hijau)
                     const sheetsResponse = await this.sheets.spreadsheets.get({
-                        spreadsheetId: this.spreadsheetId
+                        spreadsheetId: groupConfig.spreadsheetId
                     });
 
                     const transaksiSheet = sheetsResponse.data.sheets.find(
@@ -1092,28 +712,28 @@ class SheetsService {
                     if (transaksiSheet) {
                         const sheetId = transaksiSheet.properties.sheetId;
                         await this.sheets.spreadsheets.batchUpdate({
-                            spreadsheetId: this.spreadsheetId,
+                            spreadsheetId: groupConfig.spreadsheetId,
                             resource: {
                                 requests: [
-                                    // Format warna hijau untuk status Lunas (index 7)
+                                    // Format default untuk semua kolom (hitam, tidak bold)
                                     {
                                         repeatCell: {
                                             range: {
                                                 sheetId: sheetId,
                                                 startRowIndex: purchase.rowIndex - 1,
                                                 endRowIndex: purchase.rowIndex,
-                                                startColumnIndex: 7,
-                                                endColumnIndex: 8
+                                                startColumnIndex: 0,
+                                                endColumnIndex: 12
                                             },
                                             cell: {
                                                 userEnteredFormat: {
                                                     textFormat: {
                                                         foregroundColor: {
-                                                            red: 0.13,
-                                                            green: 0.55,
-                                                            blue: 0.13
+                                                            red: 0,
+                                                            green: 0,
+                                                            blue: 0
                                                         },
-                                                        bold: true
+                                                        bold: false
                                                     }
                                                 }
                                             },
@@ -1193,12 +813,12 @@ class SheetsService {
     }
 
     // Mendapatkan seluruh transaksi dengan status Belum Lunas
-    async getPendingInvoices() {
+    async getPendingInvoices(groupConfig) {
         try {
             if (!this.isInitialized) await this.init();
 
             const response = await this.sheets.spreadsheets.values.get({
-                spreadsheetId: this.spreadsheetId,
+                spreadsheetId: groupConfig.spreadsheetId,
                 range: 'Transaksi!A:L'
             });
 
@@ -1252,12 +872,12 @@ class SheetsService {
     }
 
     // Mencari transaksi iklan berdasarkan nomor VA yang sudah lunas
-    async findPaidAdvertisement(invoiceNumber) {
+    async findPaidAdvertisement(invoiceNumber, groupConfig) {
         try {
             if (!this.isInitialized) await this.init();
 
             const response = await this.sheets.spreadsheets.values.get({
-                spreadsheetId: this.spreadsheetId,
+                spreadsheetId: groupConfig.spreadsheetId,
                 range: 'Transaksi!A:L'
             });
 
@@ -1305,19 +925,19 @@ class SheetsService {
     }
 
     // Mengupdate kolom lampiran untuk transaksi iklan yang sudah lunas
-    async updateInvoiceIklanAttachment(invoiceNumber, fileUrl) {
+    async updateInvoiceIklanAttachment(invoiceNumber, fileUrl, groupConfig) {
         try {
             if (!this.isInitialized) await this.init();
 
             // Cari baris dengan invoice yang dimaksud
-            const ad = await this.findPaidAdvertisement(invoiceNumber);
+            const ad = await this.findPaidAdvertisement(invoiceNumber, groupConfig);
             if (!ad) {
                 throw new Error(`Tidak dapat menemukan transaksi iklan dengan nomor VA: ${invoiceNumber} yang sudah lunas`);
             }
 
             // Update nilai di kolom lampiran (kolom I, index 8)
             await this.sheets.spreadsheets.values.update({
-                spreadsheetId: this.spreadsheetId,
+                spreadsheetId: groupConfig.spreadsheetId,
                 range: `Transaksi!I${ad.rowIndex}`,
                 valueInputOption: 'USER_ENTERED',
                 resource: {
@@ -1329,7 +949,7 @@ class SheetsService {
 
             // Update format untuk kolom lampiran
             const sheetsResponse = await this.sheets.spreadsheets.get({
-                spreadsheetId: this.spreadsheetId
+                spreadsheetId: groupConfig.spreadsheetId
             });
 
             const transaksiSheet = sheetsResponse.data.sheets.find(
@@ -1341,7 +961,7 @@ class SheetsService {
 
                 // Format lampiran dengan warna biru dan italic
                 await this.sheets.spreadsheets.batchUpdate({
-                    spreadsheetId: this.spreadsheetId,
+                    spreadsheetId: groupConfig.spreadsheetId,
                     resource: {
                         requests: [{
                             repeatCell: {
@@ -1375,6 +995,161 @@ class SheetsService {
         } catch (error) {
             Logger.error(`Gagal mengupdate lampiran iklan: ${error.message}`);
             throw error;
+        }
+    }
+
+    // Fungsi untuk mengatur format kolom di sheet
+    async setupSheetFormat(groupConfig) {
+        try {
+            if (!this.isInitialized) await this.init();
+
+            // Dapatkan ID sheet Transaksi
+            const sheetsResponse = await this.sheets.spreadsheets.get({
+                spreadsheetId: groupConfig.spreadsheetId
+            });
+
+            const transaksiSheet = sheetsResponse.data.sheets.find(
+                sheet => sheet.properties.title === 'Transaksi'
+            );
+
+            if (transaksiSheet) {
+                const sheetId = transaksiSheet.properties.sheetId;
+
+                // Update format kolom
+                await this.sheets.spreadsheets.batchUpdate({
+                    spreadsheetId: groupConfig.spreadsheetId,
+                    resource: {
+                        requests: [
+                            // Format kolom tanggal (kolom A)
+                            {
+                                repeatCell: {
+                                    range: {
+                                        sheetId: sheetId,
+                                        startColumnIndex: 0,
+                                        endColumnIndex: 1
+                                    },
+                                    cell: {
+                                        userEnteredFormat: {
+                                            numberFormat: {
+                                                type: 'DATE',
+                                                pattern: 'dd/MM/yyyy'
+                                            }
+                                        }
+                                    },
+                                    fields: 'userEnteredFormat.numberFormat'
+                                }
+                            },
+                            // Format kolom nominal (kolom G)
+                            {
+                                repeatCell: {
+                                    range: {
+                                        sheetId: sheetId,
+                                        startColumnIndex: 6,
+                                        endColumnIndex: 7
+                                    },
+                                    cell: {
+                                        userEnteredFormat: {
+                                            numberFormat: {
+                                                type: 'CURRENCY',
+                                                pattern: '"Rp"#,##0'
+                                            }
+                                        }
+                                    },
+                                    fields: 'userEnteredFormat.numberFormat'
+                                }
+                            }
+                        ]
+                    }
+                });
+            }
+        } catch (error) {
+            Logger.error('Error saat setup format sheet:', error);
+            throw error;
+        }
+    }
+
+    // Panggil fungsi ini saat inisialisasi
+    async ensureTransactionSheetExists() {
+        try {
+            if (!this.isInitialized) await this.init();
+
+            // Iterasi setiap grup
+            for (const groupId in config.groups) {
+                const groupConfig = config.groups[groupId];
+
+                // Skip jika tidak ada spreadsheet ID
+                if (!groupConfig.spreadsheetId) {
+                    Logger.warning(`Spreadsheet ID tidak ditemukan untuk grup ${groupConfig.name}`);
+                    continue;
+                }
+
+                try {
+                    const response = await this.sheets.spreadsheets.get({
+                        spreadsheetId: groupConfig.spreadsheetId
+                    });
+
+                    const sheetExists = response.data.sheets.some(
+                        sheet => sheet.properties.title === 'Transaksi'
+                    );
+
+                    if (!sheetExists) {
+                        Logger.error(`Sheet "Transaksi" tidak ditemukan di spreadsheet grup ${groupConfig.name}!`);
+                        throw new Error(`Sheet "Transaksi" tidak ditemukan untuk grup ${groupConfig.name}`);
+                    }
+
+                    // Setup format sheet setelah memastikan sheet ada
+                    await this.setupSheetFormat(groupConfig);
+
+                    // Periksa dan pastikan header untuk kolom "Waktu Update" ada
+                    await this.ensureUpdateTimeHeaderExists(groupConfig);
+
+                    Logger.success(`Sheet Transaksi ditemukan dan format diatur untuk grup ${groupConfig.name}`);
+                } catch (error) {
+                    Logger.error(`Gagal memeriksa sheet Transaksi untuk grup ${groupConfig.name}:`, error);
+                    throw error;
+                }
+            }
+
+            return true;
+        } catch (error) {
+            Logger.error('Gagal memeriksa sheet Transaksi:', error);
+            throw error;
+        }
+    }
+
+    // Memastikan header untuk kolom Waktu Update ada
+    async ensureUpdateTimeHeaderExists(groupConfig) {
+        try {
+            const response = await this.sheets.spreadsheets.values.get({
+                spreadsheetId: groupConfig.spreadsheetId,
+                range: 'Transaksi!A1:L1'
+            });
+
+            if (!response.data.values || !response.data.values[0]) {
+                return; // Tidak ada header sama sekali
+            }
+
+            const headers = response.data.values[0];
+
+            // Jika kolom L belum ada atau bukan "Waktu Update"
+            if (headers.length < 12 || (headers.length >= 12 && headers[11] !== 'waktu update')) {
+                // Tambahkan header "waktu update" di kolom L
+                await this.sheets.spreadsheets.values.update({
+                    spreadsheetId: groupConfig.spreadsheetId,
+                    range: 'Transaksi!L1',
+                    valueInputOption: 'RAW',
+                    resource: {
+                        values: [
+                            ['waktu update']
+                        ]
+                    }
+                });
+
+                Logger.info(`Header "waktu update" ditambahkan ke spreadsheet grup ${groupConfig.name}`);
+            }
+        } catch (error) {
+            Logger.error(`Gagal memeriksa header waktu update untuk grup ${groupConfig.name}:`, error);
+            // Lanjutkan saja, tidak perlu gagal total jika hanya header yang bermasalah
         }
     }
 }
