@@ -139,6 +139,8 @@ No. INV: [nomor invoice]
 Keterangan: [deskripsi transaksi]
 Customer: [nama customer]
 Nominal: [jumlah]
+No. Rekening Penerima: [nomor rekening]
+Nama Rekening Penerima: [nama pemilik rekening]
 \`\`\`
 
 *Pembelian:*
@@ -149,6 +151,8 @@ No. INV: [nomor invoice]
 Keterangan: [deskripsi transaksi]
 Supplier: [nama supplier]
 Nominal: [jumlah]
+No. Rekening Tujuan: [nomor rekening]
+Nama Rekening Tujuan: [nama pemilik rekening]
 \`\`\`
 
 *Iklan:*
@@ -159,6 +163,8 @@ No. VA: [nomor virtual account]
 Keterangan: [deskripsi transaksi]
 Supplier: [nama supplier]
 Nominal: [jumlah]
+No. Rekening Tujuan: [nomor rekening]
+Nama Rekening Tujuan: [nama pemilik rekening]
 \`\`\`
 
 *PELUNASAN & INVOICE:*
@@ -1308,45 +1314,20 @@ async function handlePelunasanWithFile(ctx) {
                 // Lanjutkan saja jika gagal menghapus
             }
 
-            // Dapatkan informasi nominal dari transaksi yang dilunasi
-            let nominalText = '';
-            if (invoice && invoice.data[6]) {
-                // Pastikan nominal adalah angka yang valid
-                const nominalStr = invoice.data[6].toString();
-                // Hapus semua karakter yang bukan angka
-                const numericValue = nominalStr.replace(/[^\d]/g, '');
-                const nominal = parseInt(numericValue) || 0;
-                if (!isNaN(nominal) && nominal > 0) {
-                    nominalText = ` sebesar Rp ${nominal.toLocaleString('id-ID')}`;
-                }
+
+            // Cek apakah ini transaksi iklan (IsIklan = 1)
+            const isIklan = invoice.data.length >= 16 && Number(invoice.data[15]) === 1;
+            const originalSender = invoice.data.length >= 15 ? invoice.data[14] : ''; // Ambil username dari kolom O (Pengirim)
+
+            // Siapkan pesan konfirmasi
+            let confirmationMessage = `✅ Invoice *${escapeMarkdown(data.noInvoice)}* berhasil dilunasi.`;
+
+            // Jika ini transaksi iklan dan ada username pengirim, tambahkan tag
+            if (isIklan && originalSender && originalSender.trim() !== '') {
+                confirmationMessage = `✅ Invoice *${escapeMarkdown(data.noInvoice)}* berhasil dilunasi.\n\n${originalSender}, silahkan kirim invoice iklan dengan menggunakan command berikut:\n\`\`\`\n/invoiceiklan\nNo. VA: ${data.noInvoice}\n\`\`\``;
             }
 
-            // Cek apakah ini transaksi iklan dari keterangan atau jenis transaksi
-            const isIklan = invoice.data[3].toLowerCase().includes('iklan') ||
-                invoice.data[1].toLowerCase() === 'pembelian';
-
-            // Ekstrak informasi pengirim asli dari waktu input dengan pengecekan lebih detail
-            let pengirimAsli = '';
-            if (invoice && invoice.data[10]) { // Kolom K: waktu input
-                const waktuInput = invoice.data[10];
-                // Coba ekstrak username dengan @ atau nama lengkap
-                const usernameMatch = waktuInput.match(/^(@\w+|\w+(?:\s+\w+)*)/);
-                pengirimAsli = usernameMatch ? usernameMatch[1] : '';
-            }
-
-            // Log untuk debugging
-            Logger.info(`Pelunasan - isIklan: ${isIklan}, pengirimAsli: ${pengirimAsli}, keterangan: ${invoice.data[3]}, jenis: ${invoice.data[1]}`);
-
-            // Kirim konfirmasi pelunasan
-            let pelunasanMessage = `✅ Pelunasan untuk transaksi *${escapeMarkdown(data.noInvoice)}*${nominalText} berhasil dicatat.`;
-
-            // Tambahkan instruksi /invoiceiklan untuk semua transaksi pembelian
-            if (isIklan) {
-                const instruksiPengirim = pengirimAsli ? `${pengirimAsli} s` : 'S';
-                pelunasanMessage += `\n\n${instruksiPengirim}ilahkan kirim invoice iklan dengan menggunakan command berikut:\n\`\`\`\n/invoiceiklan\nNo. VA: ${data.noInvoice}\n\`\`\``;
-            }
-
-            await ctx.replyWithMarkdown(pelunasanMessage, {
+            await ctx.replyWithMarkdown(confirmationMessage, {
                 reply_to_message_id: ctx.message.message_id
             });
 

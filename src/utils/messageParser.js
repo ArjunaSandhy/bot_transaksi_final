@@ -330,7 +330,9 @@ function parseMessage(text) {
             'keterangan': false,
             'customer': false,
             'supplier': false,
-            'nominal': false
+            'nominal': false,
+            'noRekening': false,
+            'namaRekening': false
         };
 
         // Identifikasi setiap baris dan pastikan sebagai field yang tepat
@@ -423,6 +425,22 @@ function parseMessage(text) {
                 } else {
                     missingFields.push('Nominal');
                 }
+            } else if (line.match(/^No\.\s*Rekening(?:\s+(?:Penerima|Tujuan))?\s*:/i)) {
+                const value = line.replace(/^No\.\s*Rekening(?:\s+(?:Penerima|Tujuan))?\s*:/i, '').trim();
+                if (value) {
+                    data.noRekening = value;
+                    foundFields.noRekening = true;
+                } else {
+                    missingFields.push(type === 'penjualan' ? 'No. Rekening Penerima' : 'No. Rekening Tujuan');
+                }
+            } else if (line.match(/^Nama\s*Rekening(?:\s+(?:Penerima|Tujuan))?\s*:/i)) {
+                const value = line.replace(/^Nama\s*Rekening(?:\s+(?:Penerima|Tujuan))?\s*:/i, '').trim();
+                if (value) {
+                    data.namaRekening = value;
+                    foundFields.namaRekening = true;
+                } else {
+                    missingFields.push(type === 'penjualan' ? 'Nama Rekening Penerima' : 'Nama Rekening Tujuan');
+                }
             }
         }
 
@@ -433,6 +451,8 @@ function parseMessage(text) {
             if (!foundFields.keterangan && !missingFields.includes('Keterangan')) missingFields.push('Keterangan');
             if (!foundFields.customer && !missingFields.includes('Customer')) missingFields.push('Customer');
             if (!foundFields.nominal && !missingFields.includes('Nominal')) missingFields.push('Nominal');
+            if (!foundFields.noRekening && !missingFields.includes('No. Rekening Penerima')) missingFields.push('No. Rekening Penerima');
+            if (!foundFields.namaRekening && !missingFields.includes('Nama Rekening Penerima')) missingFields.push('Nama Rekening Penerima');
             data.supplier = '';
         } else if (type === 'iklan') { // Khusus untuk /iklan
             if (!foundFields.tanggal && !missingFields.includes('Tanggal')) missingFields.push('Tanggal');
@@ -440,6 +460,8 @@ function parseMessage(text) {
             if (!foundFields.keterangan && !missingFields.includes('Keterangan')) missingFields.push('Keterangan');
             if (!foundFields.supplier && !missingFields.includes('Supplier')) missingFields.push('Supplier');
             if (!foundFields.nominal && !missingFields.includes('Nominal')) missingFields.push('Nominal');
+            if (!foundFields.noRekening && !missingFields.includes('No. Rekening Tujuan')) missingFields.push('No. Rekening Tujuan');
+            if (!foundFields.namaRekening && !missingFields.includes('Nama Rekening Tujuan')) missingFields.push('Nama Rekening Tujuan');
             data.customer = '';
         } else { // pembelian atau pembelianlunas
             if (!foundFields.tanggal && !missingFields.includes('Tanggal')) missingFields.push('Tanggal');
@@ -447,6 +469,8 @@ function parseMessage(text) {
             if (!foundFields.keterangan && !missingFields.includes('Keterangan')) missingFields.push('Keterangan');
             if (!foundFields.supplier && !missingFields.includes('Supplier')) missingFields.push('Supplier');
             if (!foundFields.nominal && !missingFields.includes('Nominal')) missingFields.push('Nominal');
+            if (!foundFields.noRekening && !missingFields.includes('No. Rekening Tujuan')) missingFields.push('No. Rekening Tujuan');
+            if (!foundFields.namaRekening && !missingFields.includes('Nama Rekening Tujuan')) missingFields.push('Nama Rekening Tujuan');
             data.customer = '';
         }
 

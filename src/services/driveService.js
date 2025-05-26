@@ -38,12 +38,27 @@ class DriveService {
         try {
             if (!this.isInitialized) await this.init();
 
-            // Buat file temporary
-            const tempFilePath = path.join(os.tmpdir(), fileName);
-            fs.writeFileSync(tempFilePath, fileBuffer);
+            // Bersihkan nama file dari karakter khusus
+            const sanitizedFileName = fileName.replace(/[\/\\?%*:|"<>]/g, '-');
+
+            // Buat temporary directory jika belum ada
+            const tempDir = path.join(os.tmpdir(), 'bot_transaksi_telegram');
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
+            }
+
+            // Buat file temporary dengan nama yang sudah dibersihkan
+            const tempFilePath = path.join(tempDir, sanitizedFileName);
+
+            try {
+                fs.writeFileSync(tempFilePath, fileBuffer);
+            } catch (writeError) {
+                Logger.error(`Gagal menulis file temporary: ${writeError.message}`);
+                throw writeError;
+            }
 
             const fileMetadata = {
-                name: fileName,
+                name: sanitizedFileName,
                 parents: [groupConfig.driveFolderId]
             };
 
@@ -52,21 +67,40 @@ class DriveService {
                 body: fs.createReadStream(tempFilePath)
             };
 
-            const response = await this.drive.files.create({
-                resource: fileMetadata,
-                media: media,
-                fields: 'id, webViewLink'
-            });
+            try {
+                const response = await this.drive.files.create({
+                    resource: fileMetadata,
+                    media: media,
+                    fields: 'id, webViewLink'
+                });
 
-            // Hapus file temporary
-            fs.unlinkSync(tempFilePath);
+                // Hapus file temporary
+                try {
+                    if (fs.existsSync(tempFilePath)) {
+                        fs.unlinkSync(tempFilePath);
+                    }
+                } catch (unlinkError) {
+                    Logger.error(`Gagal menghapus file temporary: ${unlinkError.message}`);
+                    // Lanjutkan meskipun gagal menghapus file temporary
+                }
 
-            return {
-                id: response.data.id,
-                url: response.data.webViewLink
-            };
+                return {
+                    id: response.data.id,
+                    url: response.data.webViewLink
+                };
+            } catch (uploadError) {
+                // Hapus file temporary jika upload gagal
+                try {
+                    if (fs.existsSync(tempFilePath)) {
+                        fs.unlinkSync(tempFilePath);
+                    }
+                } catch (unlinkError) {
+                    Logger.error(`Gagal menghapus file temporary: ${unlinkError.message}`);
+                }
+                throw uploadError;
+            }
         } catch (error) {
-            Logger.error('Gagal mengupload file', error);
+            Logger.error(`Gagal mengupload file: ${error.message}`);
             throw error;
         }
     }

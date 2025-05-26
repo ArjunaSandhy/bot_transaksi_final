@@ -1,10 +1,10 @@
 services:
   bot:
     build: .
-    container_name: telegram_transaction_bot
-    restart: unless-stopped
+    container_name: telegram-bot-transaksi
+    restart: always
     volumes:
-      - .:/app
-      - /app/node_modules
-    env_file:
-      - .env 
+      - ./.env:/app/.env
+      - ./credentials.json:/app/credentials.json
+    environment:
+      - NODE_ENV=production 
