@@ -176,4 +176,152 @@ sudo ufw enable
 ```bash
 sudo apt update
 sudo apt upgrade
-``` 
+```
+
+## Deployment dengan Docker
+
+### Persiapan
+
+1. Clone repository
+```bash
+git clone URL_REPOSITORY_ANDA
+cd bot_transaksi_telegram
+```
+
+2. Setup environment variables
+```bash
+cp env.example .env
+# Edit file .env sesuai kebutuhan
+```
+
+3. Siapkan credentials Google
+```bash
+# Buat folder credentials
+mkdir -p credentials
+# Copy file credentials.json ke folder credentials
+```
+
+### Menjalankan dengan Docker
+
+1. Build dan jalankan container
+```bash
+# Build image
+docker-compose build
+
+# Jalankan container
+docker-compose up -d
+```
+
+2. Cek status dan logs
+```bash
+# Cek status container
+docker-compose ps
+
+# Lihat logs
+docker-compose logs -f bot
+```
+
+3. Menghentikan bot
+```bash
+docker-compose down
+```
+
+### Perintah Docker Lainnya
+
+```bash
+# Restart bot
+docker-compose restart bot
+
+# Update kode dan rebuild
+git pull
+docker-compose down
+docker-compose build
+docker-compose up -d
+
+# Lihat penggunaan resource
+docker stats
+```
+
+## Deployment Manual (Tanpa Docker)
+
+1. Install dependencies
+```bash
+npm install
+```
+
+2. Setup environment variables
+```bash
+cp env.example .env
+# Edit file .env sesuai kebutuhan
+```
+
+3. Jalankan bot
+```bash
+node main.js
+```
+
+## Konfigurasi
+
+Bot ini mendukung konfigurasi multiple grup dengan parameter berikut untuk setiap grup:
+
+- GROUP_ID: ID grup Telegram
+- GROUP_NAME: Nama grup
+- GROUP_SHEET: ID Google Spreadsheet
+- GROUP_DRIVE: ID folder Google Drive
+- GROUP_NOTIFICATION_TOPIC_ID: ID topic untuk notifikasi
+
+## Pemeliharaan
+
+### Backup
+
+Disarankan untuk melakukan backup secara berkala:
+```bash
+# Backup manual
+tar -czf backup_bot_$(date +%Y%m%d).tar.gz \
+    --exclude=node_modules \
+    --exclude=.git \
+    .
+```
+
+### Update
+
+```bash
+# Update kode
+git pull
+
+# Update dependencies
+npm install
+
+# Restart bot
+# Jika menggunakan Docker:
+docker-compose restart bot
+# Jika manual:
+pm2 restart bot # atau cara restart lainnya
+```
+
+## Troubleshooting
+
+### Masalah Umum
+
+1. Bot tidak merespons
+   - Cek status bot dan logs
+   - Pastikan token bot valid
+   - Periksa koneksi internet
+
+2. Error Google API
+   - Pastikan credentials.json valid
+   - Periksa scope API yang diizinkan
+   - Refresh token jika expired
+
+### Logs
+
+- Docker: `docker-compose logs -f bot`
+- Manual: Cek file di folder `logs/`
+
+## Kontribusi
+
+Silakan buat issue atau pull request untuk kontribusi.
+
+## Lisensi
+
+MIT License 

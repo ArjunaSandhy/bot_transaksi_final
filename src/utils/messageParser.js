@@ -752,8 +752,8 @@ function parseInvoiceIklanMessage(text) {
 
 module.exports = {
     parseMessage,
+    getCurrentTimeWIB,
     parseUpdateStatusMessage,
     parseUpdateStatusBatchMessage,
-    getCurrentTimeWIB,
     parseInvoiceIklanMessage
 };

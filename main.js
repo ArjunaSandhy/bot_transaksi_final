@@ -7,6 +7,7 @@ const Logger = require('./src/utils/logger');
 const config = require('./config');
 const path = require('path');
 const cron = require('node-cron');
+const fetch = require('node-fetch');
 
 // Inisialisasi bot
 const bot = new Telegraf(config.botToken);
@@ -97,6 +98,25 @@ function escapeMarkdown(text) {
         .replace(/\}/g, '\\}')
         .replace(/\./g, '\\.')
         .replace(/\!/g, '\\!');
+}
+
+// Fungsi untuk memformat tanggal dari formula Google Sheets
+function formatDateFromSheet(dateStr) {
+    // Cek apakah ini formula DATE
+    const dateFormulaMatch = dateStr.match(/=DATE\((\d+),(\d+),(\d+)\)/);
+    if (dateFormulaMatch) {
+        const [_, year, month, day] = dateFormulaMatch;
+        return `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`;
+    }
+
+    // Cek apakah format DD/MM/YYYY
+    const dateMatch = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (dateMatch) {
+        const [_, day, month, year] = dateMatch;
+        return `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`;
+    }
+
+    return dateStr;
 }
 
 // Handler saat bot mulai
@@ -1234,7 +1254,7 @@ async function handlePelunasanWithFile(ctx) {
         let fileId, mimeType, fileName;
 
         // Format tanggal DD-MM-YYYY 
-        const formattedDate = invoice.data[0].replace(/\//g, '-');
+        const formattedDate = formatDateFromSheet(invoice.data[0]);
         // Dapatkan nama supplier
         const supplierName = invoice.data[4].replace(/\s+/g, '-');
 
@@ -1301,23 +1321,29 @@ async function handlePelunasanWithFile(ctx) {
                 }
             }
 
-            // Ekstrak informasi pengirim asli dari waktu input
+            // Cek apakah ini transaksi iklan dari keterangan atau jenis transaksi
+            const isIklan = invoice.data[3].toLowerCase().includes('iklan') ||
+                invoice.data[1].toLowerCase() === 'pembelian';
+
+            // Ekstrak informasi pengirim asli dari waktu input dengan pengecekan lebih detail
             let pengirimAsli = '';
             if (invoice && invoice.data[10]) { // Kolom K: waktu input
                 const waktuInput = invoice.data[10];
-                const usernameMatch = waktuInput.match(/^(@\w+)/);
+                // Coba ekstrak username dengan @ atau nama lengkap
+                const usernameMatch = waktuInput.match(/^(@\w+|\w+(?:\s+\w+)*)/);
                 pengirimAsli = usernameMatch ? usernameMatch[1] : '';
             }
 
-            // Cek apakah ini transaksi iklan dari keterangan
-            const isIklan = invoice.data[3].toLowerCase().includes('iklan');
+            // Log untuk debugging
+            Logger.info(`Pelunasan - isIklan: ${isIklan}, pengirimAsli: ${pengirimAsli}, keterangan: ${invoice.data[3]}, jenis: ${invoice.data[1]}`);
 
             // Kirim konfirmasi pelunasan
             let pelunasanMessage = `✅ Pelunasan untuk transaksi *${escapeMarkdown(data.noInvoice)}*${nominalText} berhasil dicatat.`;
 
-            // Tambahkan instruksi /invoiceiklan hanya jika ini transaksi iklan
-            if (isIklan && pengirimAsli) {
-                pelunasanMessage += `\n\n${pengirimAsli} silahkan kirim invoice iklan dengan menggunakan command berikut:\n\`\`\`\n/invoiceiklan\n${data.noInvoice}\n\`\`\``;
+            // Tambahkan instruksi /invoiceiklan untuk semua transaksi pembelian
+            if (isIklan) {
+                const instruksiPengirim = pengirimAsli ? `${pengirimAsli} s` : 'S';
+                pelunasanMessage += `\n\n${instruksiPengirim}ilahkan kirim invoice iklan dengan menggunakan command berikut:\n\`\`\`\n/invoiceiklan\nNo. VA: ${data.noInvoice}\n\`\`\``;
             }
 
             await ctx.replyWithMarkdown(pelunasanMessage, {
