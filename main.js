@@ -163,8 +163,8 @@ No. VA: [nomor virtual account]
 Keterangan: [deskripsi transaksi]
 Supplier: [nama supplier]
 Nominal: [jumlah]
-No. Rekening Tujuan: [nomor rekening]
-Nama Rekening Tujuan: [nama pemilik rekening]
+Rekening Pengirim: [nomor rekening]
+Nama Rekening Pengirim: [nama pemilik rekening]
 \`\`\`
 
 *PELUNASAN & INVOICE:*
@@ -603,11 +603,15 @@ async function formatAndSendPendingInvoices(ctx, pendingInvoices, isReply = true
     pendingInvoices.forEach((invoice) => {
         const supplier = invoice.supplier || 'Lainnya';
         const nominal = invoice.nominal || 0;
+        const noRekening = invoice.noRekening || '-';
+        const namaRekening = invoice.namaRekening || '-';
 
         if (!invoicesBySupplier[supplier]) {
             invoicesBySupplier[supplier] = {
                 invoices: [],
-                totalNominal: 0
+                totalNominal: 0,
+                noRekening: noRekening,
+                namaRekening: namaRekening
             };
         }
 
@@ -628,6 +632,8 @@ async function formatAndSendPendingInvoices(ctx, pendingInvoices, isReply = true
 
         message += `\n👨‍💼 *${supplier}*\n`;
         message += `💰 Total: *Rp ${supplierData.totalNominal.toLocaleString('id-ID')}*\n`;
+        message += `🏦 No. Rekening: \`${supplierData.noRekening}\`\n`;
+        message += `👤 Nama Rekening: \`${supplierData.namaRekening}\`\n\n`;
 
         supplierData.invoices.forEach((invoice, idx) => {
             // Format yang lebih mudah dibaca dengan emoji dan penggantian baris yang lebih jelas
@@ -673,7 +679,9 @@ async function formatAndSendPendingInvoices(ctx, pendingInvoices, isReply = true
             for (const supplier of sortedSuppliers) {
                 const supplierData = invoicesBySupplier[supplier];
                 let supplierMessage = `👨‍💼 *${supplier}*\n`;
-                supplierMessage += `💰 Total: *Rp ${supplierData.totalNominal.toLocaleString('id-ID')}*\n\n`;
+                supplierMessage += `💰 Total: *Rp ${supplierData.totalNominal.toLocaleString('id-ID')}*\n`;
+                supplierMessage += `🏦 No. Rekening: \`${supplierData.noRekening}\`\n`;
+                supplierMessage += `👤 Nama Rekening: \`${supplierData.namaRekening}\`\n\n`;
 
                 supplierData.invoices.forEach((invoice, idx) => {
                     supplierMessage += `${idx + 1}. \`${invoice.invoiceNumber}\` (${invoice.date})\n`;
@@ -988,11 +996,15 @@ async function sendPendingInvoicesNotification() {
                 pendingInvoices.forEach((invoice) => {
                     const supplier = invoice.supplier || 'Lainnya';
                     const nominal = invoice.nominal || 0;
+                    const noRekening = invoice.noRekening || '-';
+                    const namaRekening = invoice.namaRekening || '-';
 
                     if (!invoicesBySupplier[supplier]) {
                         invoicesBySupplier[supplier] = {
                             invoices: [],
-                            totalNominal: 0
+                            totalNominal: 0,
+                            noRekening: noRekening,
+                            namaRekening: namaRekening
                         };
                     }
 
@@ -1013,6 +1025,8 @@ async function sendPendingInvoicesNotification() {
 
                     message += `\n👨‍💼 *${supplier}*\n`;
                     message += `💰 Total: *Rp ${supplierData.totalNominal.toLocaleString('id-ID')}*\n`;
+                    message += `🏦 No. Rekening: \`${supplierData.noRekening}\`\n`;
+                    message += `👤 Nama Rekening: \`${supplierData.namaRekening}\`\n\n`;
 
                     supplierData.invoices.forEach((invoice, idx) => {
                         // Format yang lebih mudah dibaca dengan emoji dan penggantian baris yang lebih jelas
@@ -1059,7 +1073,9 @@ async function sendPendingInvoicesNotification() {
                         for (const supplier of sortedSuppliers) {
                             const supplierData = invoicesBySupplier[supplier];
                             let supplierMessage = `👨‍💼 *${supplier}*\n`;
-                            supplierMessage += `💰 Total: *Rp ${supplierData.totalNominal.toLocaleString('id-ID')}*\n\n`;
+                            supplierMessage += `💰 Total: *Rp ${supplierData.totalNominal.toLocaleString('id-ID')}*\n`;
+                            supplierMessage += `🏦 No. Rekening: \`${supplierData.noRekening}\`\n`;
+                            supplierMessage += `👤 Nama Rekening: \`${supplierData.namaRekening}\`\n\n`;
 
                             supplierData.invoices.forEach((invoice, idx) => {
                                 supplierMessage += `${idx + 1}. \`${invoice.invoiceNumber}\` (${invoice.date})\n`;
@@ -1067,7 +1083,7 @@ async function sendPendingInvoicesNotification() {
                                 supplierMessage += `   📝 ${invoice.description}\n\n`;
                             });
 
-                            await ctx.telegram.sendMessage(
+                            await bot.telegram.sendMessage(
                                 groupId,
                                 supplierMessage, {
                                     parse_mode: 'Markdown',
@@ -1081,7 +1097,7 @@ async function sendPendingInvoicesNotification() {
                         summaryMessage += `💵 *TOTAL KESELURUHAN:*\n*Rp ${totalNominalAll.toLocaleString('id-ID')}*\n`;
                         summaryMessage += `📊 Jumlah invoice: ${pendingInvoices.length}`;
 
-                        await ctx.telegram.sendMessage(
+                        await bot.telegram.sendMessage(
                             groupId,
                             summaryMessage, {
                                 parse_mode: 'Markdown',

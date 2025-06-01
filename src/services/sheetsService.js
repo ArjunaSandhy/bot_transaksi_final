@@ -655,56 +655,45 @@ class SheetsService {
         try {
             if (!this.isInitialized) await this.init();
 
+            // Dapatkan semua data dari sheet
             const response = await this.sheets.spreadsheets.values.get({
                 spreadsheetId: groupConfig.spreadsheetId,
-                range: 'Transaksi!A:P'
+                range: 'Transaksi!A2:I' // Ubah range untuk mengambil kolom H dan I
             });
 
-            if (!response.data.values) {
+            const rows = response.data.values;
+            if (!rows || rows.length === 0) {
                 return [];
             }
 
-            const values = response.data.values;
             const pendingInvoices = [];
 
-            // Mulai dari baris kedua (skip header)
-            for (let i = 1; i < values.length; i++) {
-                const row = values[i];
-                // Pastikan baris memiliki cukup kolom
-                if (row && row.length >= 14) {
-                    const transactionType = row[1]; // Jenis Transaksi
-                    const invoiceNumber = row[2]; // No. Invoice
-                    const description = row[3]; // Keterangan
-                    const supplier = row[4]; // Supplier
-                    const status = row[9]; // Status
-                    const date = row[0]; // Tanggal
-
+            rows.forEach((row, index) => {
+                // Pastikan ini adalah transaksi pembelian dan belum lunas
+                if (row[1] === 'Pembelian' && row[7] !== 'Lunas') {
                     // Pastikan nilai nominal valid dan dikonversi dengan benar
-                    let nominal = row[6] || '0'; // Nominal
-
-                    // Hapus karakter non-digit (kecuali titik)
+                    let nominal = row[6] || '0'; // Menggunakan kolom G (indeks 6) untuk nominal
+                    // Hapus karakter non-digit
                     nominal = nominal.toString().replace(/[^\d]/g, '');
-
                     // Konversi ke angka (atau 0 jika gagal)
                     const nominalValue = nominal ? parseInt(nominal) : 0;
 
-                    // Hanya tambahkan transaksi pembelian dengan status "Belum Lunas"
-                    if (transactionType === 'Pembelian' && status === 'Belum Lunas') {
-                        pendingInvoices.push({
-                            rowIndex: i + 1,
-                            invoiceNumber,
-                            description,
-                            supplier,
-                            date,
-                            nominal: nominalValue
-                        });
-                    }
+                    pendingInvoices.push({
+                        date: row[0],
+                        invoiceNumber: row[2],
+                        description: row[3],
+                        supplier: row[4],
+                        nominal: nominalValue,
+                        noRekening: row[7] || '-', // Kolom H
+                        namaRekening: row[8] || '-', // Kolom I
+                        rowIndex: index + 2
+                    });
                 }
-            }
+            });
 
             return pendingInvoices;
         } catch (error) {
-            Logger.error('Gagal mendapatkan daftar invoice yang belum lunas:', error);
+            Logger.error('Error saat mengambil invoice yang belum lunas:', error);
             throw error;
         }
     }

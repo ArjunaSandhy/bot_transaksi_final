@@ -425,21 +425,33 @@ function parseMessage(text) {
                 } else {
                     missingFields.push('Nominal');
                 }
-            } else if (line.match(/^No\.\s*Rekening(?:\s+(?:Penerima|Tujuan))?\s*:/i)) {
-                const value = line.replace(/^No\.\s*Rekening(?:\s+(?:Penerima|Tujuan))?\s*:/i, '').trim();
+            } else if (line.match(/^(?:No\.\s*Rekening|Rekening)\s*(?:(?:Penerima|Tujuan|Pengirim))?\s*:/i)) {
+                const value = line.replace(/^(?:No\.\s*Rekening|Rekening)\s*(?:(?:Penerima|Tujuan|Pengirim))?\s*:/i, '').trim();
                 if (value) {
                     data.noRekening = value;
                     foundFields.noRekening = true;
                 } else {
-                    missingFields.push(type === 'penjualan' ? 'No. Rekening Penerima' : 'No. Rekening Tujuan');
+                    if (type === 'penjualan') {
+                        missingFields.push('No. Rekening Penerima');
+                    } else if (type === 'iklan') {
+                        missingFields.push('Rekening Pengirim');
+                    } else {
+                        missingFields.push('No. Rekening Tujuan');
+                    }
                 }
-            } else if (line.match(/^Nama\s*Rekening(?:\s+(?:Penerima|Tujuan))?\s*:/i)) {
-                const value = line.replace(/^Nama\s*Rekening(?:\s+(?:Penerima|Tujuan))?\s*:/i, '').trim();
+            } else if (line.match(/^Nama\s*Rekening\s*(?:(?:Penerima|Tujuan|Pengirim))?\s*:/i)) {
+                const value = line.replace(/^Nama\s*Rekening\s*(?:(?:Penerima|Tujuan|Pengirim))?\s*:/i, '').trim();
                 if (value) {
                     data.namaRekening = value;
                     foundFields.namaRekening = true;
                 } else {
-                    missingFields.push(type === 'penjualan' ? 'Nama Rekening Penerima' : 'Nama Rekening Tujuan');
+                    if (type === 'penjualan') {
+                        missingFields.push('Nama Rekening Penerima');
+                    } else if (type === 'iklan') {
+                        missingFields.push('Nama Rekening Pengirim');
+                    } else {
+                        missingFields.push('Nama Rekening Tujuan');
+                    }
                 }
             }
         }
@@ -460,8 +472,8 @@ function parseMessage(text) {
             if (!foundFields.keterangan && !missingFields.includes('Keterangan')) missingFields.push('Keterangan');
             if (!foundFields.supplier && !missingFields.includes('Supplier')) missingFields.push('Supplier');
             if (!foundFields.nominal && !missingFields.includes('Nominal')) missingFields.push('Nominal');
-            if (!foundFields.noRekening && !missingFields.includes('No. Rekening Tujuan')) missingFields.push('No. Rekening Tujuan');
-            if (!foundFields.namaRekening && !missingFields.includes('Nama Rekening Tujuan')) missingFields.push('Nama Rekening Tujuan');
+            if (!foundFields.noRekening && !missingFields.includes('Rekening Pengirim')) missingFields.push('Rekening Pengirim');
+            if (!foundFields.namaRekening && !missingFields.includes('Nama Rekening Pengirim')) missingFields.push('Nama Rekening Pengirim');
             data.customer = '';
         } else { // pembelian atau pembelianlunas
             if (!foundFields.tanggal && !missingFields.includes('Tanggal')) missingFields.push('Tanggal');
