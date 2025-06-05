@@ -655,10 +655,10 @@ class SheetsService {
         try {
             if (!this.isInitialized) await this.init();
 
-            // Dapatkan semua data dari sheet
+            // Dapatkan semua data dari sheet, termasuk kolom J (Status)
             const response = await this.sheets.spreadsheets.values.get({
                 spreadsheetId: groupConfig.spreadsheetId,
-                range: 'Transaksi!A2:I' // Ubah range untuk mengambil kolom H dan I
+                range: 'Transaksi!A2:J' // Ubah range untuk mengambil kolom J (Status)
             });
 
             const rows = response.data.values;
@@ -670,7 +670,9 @@ class SheetsService {
 
             rows.forEach((row, index) => {
                 // Pastikan ini adalah transaksi pembelian dan belum lunas
-                if (row[1] === 'Pembelian' && row[7] !== 'Lunas') {
+                // row[1] = Jenis Transaksi (Pembelian)
+                // row[9] = Status (kolom J)
+                if (row[1] === 'Pembelian' && row[9] !== 'Lunas') {
                     // Pastikan nilai nominal valid dan dikonversi dengan benar
                     let nominal = row[6] || '0'; // Menggunakan kolom G (indeks 6) untuk nominal
                     // Hapus karakter non-digit
