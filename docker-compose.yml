@@ -7,4 +7,4 @@ services:
       - ./.env:/app/.env
       - ./credentials.json:/app/credentials.json
     environment:
-      - NODE_ENV=production 
+      - NODE_ENV=production

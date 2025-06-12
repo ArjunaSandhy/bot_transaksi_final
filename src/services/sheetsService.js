@@ -90,21 +90,52 @@ class SheetsService {
         }
     }
 
-    // Fungsi untuk memformat tanggal dari DD/MM/YYYY menjadi format Google Sheets (MM/DD/YYYY)
-    formatDateForSheet(dateStr) {
+    // Fungsi untuk memformat tanggal dari berbagai format ke DD-MM-YYYY
+    formatDateFromSheet(dateStr) {
         if (!dateStr) return '';
 
         try {
-            // Validasi format tanggal
-            const dateMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-            if (!dateMatch) {
-                Logger.error(`Format tanggal tidak valid: ${dateStr}`);
-                return dateStr;
+            // Pastikan dateStr adalah string
+            dateStr = String(dateStr);
+
+            // Cek apakah ini formula DATE
+            const dateFormulaMatch = dateStr.match(/=DATE\((\d+),(\d+),(\d+)\)/);
+            if (dateFormulaMatch) {
+                const [_, year, month, day] = dateFormulaMatch;
+                return `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`;
             }
 
-            const [_, day, month, year] = dateMatch;
-            // Format tanggal menjadi MM/DD/YYYY (format yang diterima Google Sheets)
-            return `${month}/${day}/${year}`;
+            // Cek apakah format DD/MM/YYYY
+            const dateMatch = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+            if (dateMatch) {
+                const [_, day, month, year] = dateMatch;
+                // Pastikan day dan month selalu 2 digit
+                const formattedDay = day.padStart(2, '0');
+                const formattedMonth = month.padStart(2, '0');
+                return `${formattedDay}-${month}-${year}`;
+            }
+
+            // Cek apakah format MM/DD/YYYY
+            const dateMatchUS = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+            if (dateMatchUS) {
+                const [_, month, day, year] = dateMatchUS;
+                // Pastikan day dan month selalu 2 digit
+                const formattedDay = day.padStart(2, '0');
+                const formattedMonth = month.padStart(2, '0');
+                return `${formattedDay}-${formattedMonth}-${year}`;
+            }
+
+            // Jika format lain, coba parse sebagai Date
+            const date = new Date(dateStr);
+            if (!isNaN(date.getTime())) {
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}-${month}-${year}`;
+            }
+
+            // Jika semua format gagal, kembalikan string asli
+            return dateStr;
         } catch (error) {
             Logger.error(`Error saat memformat tanggal: ${error.message}`);
             return dateStr;
@@ -230,7 +261,7 @@ class SheetsService {
         if (!this.isInitialized) await this.init();
 
         // Format tanggal dan nominal sebelum disimpan
-        const formattedDate = this.formatDateForSheet(data.tanggal);
+        const formattedDate = this.formatDateFromSheet(data.tanggal);
         const formattedNominal = this.formatNominalForSheet(data.nominal);
 
         // Data untuk disimpan ke Google Sheets sesuai urutan kolom
@@ -296,7 +327,7 @@ class SheetsService {
         if (!this.isInitialized) await this.init();
 
         // Format tanggal dan nominal sebelum disimpan
-        const formattedDate = this.formatDateForSheet(data.tanggal);
+        const formattedDate = this.formatDateFromSheet(data.tanggal);
         const formattedNominal = this.formatNominalForSheet(data.nominal);
 
         // Pastikan waktu input memiliki username

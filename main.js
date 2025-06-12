@@ -1275,8 +1275,8 @@ async function handlePelunasanWithFile(ctx) {
         // Proses file bukti transfer
         let fileId, mimeType, fileName;
 
-        // Format tanggal DD-MM-YYYY 
-        const formattedDate = formatDateFromSheet(invoice.data[0]);
+        // Format tanggal DD-MM-YYYY menggunakan fungsi dari sheetsService
+        const formattedDate = sheetsService.formatDateFromSheet(invoice.data[0]);
         // Dapatkan nama supplier
         const supplierName = invoice.data[4].replace(/\s+/g, '-');
 

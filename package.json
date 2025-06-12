@@ -21,6 +21,7 @@
         "dotenv": "^16.3.1",
         "googleapis": "^126.0.1",
         "node-cron": "^3.0.3",
+        "node-schedule": "^2.1.1",
         "nodemon": "^3.0.1",
         "pm2": "^6.0.6",
         "telegraf": "^4.12.2"
